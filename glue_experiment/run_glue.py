@@ -57,13 +57,6 @@ def main():
     else:
         training_args.learning_rate = float(training_args.learning_rate)
 
-    # Set optimizer
-    optimizer = torch.optim.AdamW(
-        model.parameters(),
-        lr=training_args.learning_rate,
-        weight_decay=training_args.weight_decay
-    )
-
     ############################### Wandb Saves ################################
     training_args.all_params, training_args.trainable_params = \
         utils.print_trainable_parameters(model)
@@ -90,6 +83,13 @@ def main():
     print("$"*30, f" {run_name} ", "$"*30)
 
     ############## FAT STEP ##############
+    # Set optimizer with big lr [NOT DONE]
+    optimizer = torch.optim.AdamW(
+        model.parameters(),
+        lr=training_args.learning_rate,
+        weight_decay=training_args.weight_decay
+    )
+    
     training_args.max_steps = 10
     
     trainer=Trainer(
@@ -162,6 +162,13 @@ def main():
             ### end: A = torch.Size([768, 3]), B = torch.Size([3, 768])
     
     #####################################
+    
+    # Set optimizer with normal lr [NOT DONE]
+    optimizer = torch.optim.AdamW(
+        model.parameters(),
+        lr=training_args.learning_rate,
+        weight_decay=training_args.weight_decay
+    )
 
     training_args.max_steps = -1 # Default value
     trainer=Trainer(
