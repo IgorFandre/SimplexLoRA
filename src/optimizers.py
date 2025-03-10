@@ -320,6 +320,49 @@ def proj_0(x: torch.Tensor, K: int):
     x[idx] = 0.
     return x
 
+def proj_simplex(x: torch.Tensor, temp: int): # NEW
+    x_0 = (x - x.max()) / temp
+    return torch.exp(x_0) / torch.exp(x_0).sum()
+
+def upgrade_lora_AB(param_A, param_B, r_new):
+    Q, R = torch.linalg.qr(param_A.data, mode="reduced")
+    N = torch.rand(
+        (param_A.data.shape[0], r_new - param_A.data.shape[1]),
+        requires_grad=True,
+        device=param_A.data.device
+    )
+    I = torch.eye(
+        np.max(param_A.data.shape),
+        requires_grad=True,
+        device=param_A.data.device
+    )
+    O = torch.zeros(
+        (r_new - param_B.data.shape[0], param_B.data.shape[1]),
+        requires_grad=True,
+        device=param_B.data.device
+    )
+
+    param_A.data = torch.concat([Q, (I - Q@Q.T)@N], dim=1)
+    param_B.data = torch.concat([R @ param_B.data, O], dim=0)
+
+def downgrade_lora_AB(param_A, param_B, r_new):
+    Q_A, R_A = torch.linalg.qr(param_A.data, mode="reduced")
+    Q_B, R_B = torch.linalg.qr(param_B.data.T, mode="reduced")
+    U, S, V = torch.linalg.svd(R_A @ R_B.T)
+
+    dim_S = max(U.shape[1], V.shape[0])
+    if len(S) < dim_S:
+        S = torch.diag(torch.concat((S, torch.zeros(dim_S-len(S), device=S.device))))[:U.shape[1], :V.shape[0]]
+    else:
+        S = torch.diag(S)
+
+    U_r = U[:, :r_new]
+    S_r = S[:r_new, :r_new]
+    V_r = V[:r_new, :]
+
+    param_A.data = Q_A @ U_r
+    param_B.data = S_r @ V_r @ Q_B.T
+
 class FatAdamW(optim.Optimizer):
     """
     Implements Adam algorithm with weight decay for Weight Lora adapter
@@ -354,6 +397,7 @@ class FatAdamW(optim.Optimizer):
         lora_extention: str = "dummy",
         fat_step: int = 10,
         max_fat_steps: int = 3,
+        default_lora_rank: int = 16 # NEW
     ):
         if not no_deprecation_warning:
             warnings.warn(
@@ -373,8 +417,11 @@ class FatAdamW(optim.Optimizer):
             raise ValueError(f"Invalid epsilon value: {eps} - should be >= 0.0")
         defaults = {"lr": lr, "betas": betas, "eps": eps, "weight_decay": weight_decay, "correct_bias": correct_bias}
         super().__init__(params, defaults)
-        self.k = num_adapters
+        self.temp = 1 # WARNING !!!
+        self.num_adapters = num_adapters # NEW
         self.chosen_layers = list(range(num_adapters))
+        self.lora_ranks = [default_lora_rank] * num_adapters # NEW
+        self.default_lora_rank = default_lora_rank # NEW
         if lora_extention not in ["smart", "dummy", "restart"]:
             raise ValueError(f"Wrong lora_extention: {lora_extention}")
         self.lora_extention = lora_extention
@@ -393,6 +440,46 @@ class FatAdamW(optim.Optimizer):
         loss = None
         if closure is not None:
             loss = closure()
+        
+        for group in self.param_groups:
+            if group["name"] != "weight_params":
+                continue
+            ######################## StoIHT step for w #########################
+            if self.max_fat_steps == 0: 
+                self.max_fat_steps -= 1
+            if self.max_fat_steps > 0:
+                w_vector = []
+                if "w_step" not in group.keys(): 
+                    group["w_step"] = 0
+                group["w_step"] += 1
+                for i, p in enumerate(group["params"]):
+                    if p.grad is None or i not in self.chosen_layers:
+                        continue
+                    p.add_(p.grad, alpha=-group['lr'])
+                    if group["w_step"] % self.fat_step == 0:
+                        w_vector.append(p.data.item())
+
+                if group["w_step"] % self.fat_step == 0:
+                    # self.temp *= 2 # need to update temperature
+                    self.max_fat_steps -= 1
+                    new_chosen_layers = []
+                    w_vector = torch.tensor(w_vector)
+                    w_vector = group["proj"](w_vector, self.temp) # should use def proj_simplex()
+                    new_lora_ranks = torch.floor(self.num_adapters * w_vector * self.default_lora_rank)
+                    j = 0
+                    for i, p in enumerate(group["params"]):
+                        if p.grad is None or i not in self.chosen_layers:
+                            continue
+                        if new_lora_ranks[j] > 0: 
+                            new_chosen_layers.append(i)
+                        p.data = torch.tensor([w_vector[j]], device=p.device)
+                        j += 1
+                    self.chosen_layers = new_chosen_layers
+                    self.lora_ranks = new_lora_ranks
+                    print("$$$$$$$$", self.chosen_layers, "$$$$$$$$")
+            ####################################################################
+        
+        lora_idx = 0
 
         for group in self.param_groups:
             if group["name"] != "weight_params":
@@ -400,7 +487,7 @@ class FatAdamW(optim.Optimizer):
                 for i, p in enumerate(group["params"]):
                     if p.grad is None:
                         continue
-                    if (i // 2) not in self.chosen_layers and group["name"] == "loraAB":
+                    if (i // 2) not in self.chosen_layers and group["name"] == "loraAB": # WARNING !!! Why Andy divide i by 2 ???
                         continue
                         
                     grad = p.grad
@@ -423,30 +510,37 @@ class FatAdamW(optim.Optimizer):
 
                     if group["name"] == "loraAB" and state["step"] % self.fat_step == 0 and self.max_fat_steps >= 0:
                         A_or_B = np.argmin(p.data.shape)
-                        # self.state[p] = {}
+                        cur_lora_rank = np.min(p.data.shape)
+                        
+                        # играю в предположении, что лора А идет раньше лоры Б
+
                         if A_or_B == 1: # lora_A
                             if self.lora_extention == "dummy":
                                 N = torch.rand_like(p.data, requires_grad=True)
                                 p.data = torch.concat([p.data, N], dim=1)
                             elif self.lora_extention == "smart":
-                                Q, self.R = torch.linalg.qr(p.data, mode="reduced")
-                                N = torch.rand_like(p.data, requires_grad=True)
-                                I = torch.eye(np.max(p.data.shape), 
-                                              requires_grad=True,
-                                              device=p.data.device)
-                                p.data = torch.concat([Q, (I - Q@Q.T)@N], dim=1)
+                                self.A = p
                             elif self.lora_extention == "restart":
                                 N_1 = torch.rand_like(p.data, requires_grad=True)
                                 N_2 = torch.rand_like(p.data, requires_grad=True)
                                 p.data = torch.concat([N_1, N_2], dim=1)
                         else: # lora_B
-                            O = torch.zeros_like(p.data, requires_grad=True)
+                            O = torch.zeros((self.lora_ranks[lora_idx] - p.data.shape[0], p.data.shape[1]), requires_grad=True, device=p.data.device)
                             if self.lora_extention == "dummy":
                                 p.data = torch.concat([p.data, O], dim=0)
                             elif self.lora_extention == "smart":
-                                p.data = torch.concat([self.R @ p.data, O], dim=0)
+                                self.B = p
+                                if self.lora_ranks[lora_idx] == 0:
+                                    self.A.data = torch.zeros((self.A.data.shape[0], 1), requires_grad=False, device=self.A.data.device)
+                                    self.B.data = torch.zeros((1, self.B.data.shape[1]), requires_grad=False, device=self.B.data.device)
+                                elif self.lora_ranks[lora_idx] > cur_lora_rank:
+                                    upgrade_lora_AB(self.A, self.B, self.lora_ranks[lora_idx])
+                                elif self.lora_ranks[lora_idx] < cur_lora_rank:
+                                    downgrade_lora_AB(self.A, self.B, self.lora_ranks[lora_idx])
                             elif self.lora_extention == "restart":
                                 p.data = torch.concat([O, O], dim=0)
+                            
+                            lora_idx += 1 # lora_B идет после lora_A, значит тут увеличиваем индекс для перехода к обработке новой лоры
 
                         state["step"] = 0
                         state["exp_avg"] = torch.zeros_like(p)
@@ -466,36 +560,6 @@ class FatAdamW(optim.Optimizer):
                     p.addcdiv_(exp_avg, denom, value=-step_size)
                     if group["weight_decay"] > 0.0:
                         p.add_(p, alpha=(-group["lr"] * group["weight_decay"]))
-            else:
-            ######################## StoIHT step for w #########################
-                if self.max_fat_steps == 0: self.max_fat_steps -= 1
-                if self.max_fat_steps > 0:
-                    w_vector = []
-                    if "w_step" not in group.keys(): group["w_step"] = 0
-                    group["w_step"] += 1
-                    for i, p in enumerate(group["params"]):
-                        if p.grad is None or i not in self.chosen_layers:
-                            continue
-                        p.add_(p.grad, alpha=-group['lr'])
-                        if group["w_step"] % self.fat_step == 0:
-                            w_vector.append(p.data.item())
-
-                    if group["w_step"] % self.fat_step == 0:
-                        self.k //= 2
-                        self.max_fat_steps -= 1
-                        new_chosen_layers = []
-                        w_vector = torch.tensor(w_vector)
-                        w_vector = group["proj"](w_vector, self.k)
-                        j = 0
-                        for i, p in enumerate(group["params"]):
-                            if p.grad is None or i not in self.chosen_layers:
-                                continue
-                            if w_vector[j] > 0: new_chosen_layers.append(i)
-                            p.data = torch.tensor([w_vector[j]], device=p.device)
-                            j += 1
-                        self.chosen_layers = new_chosen_layers
-                        print("$$$$$$$$", self.chosen_layers, "$$$$$$$$")
-            ####################################################################
         return loss
     
 class WeightAdamW(optim.Optimizer):
