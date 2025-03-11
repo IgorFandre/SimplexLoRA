@@ -465,7 +465,7 @@ class FatAdamW(optim.Optimizer):
                     new_chosen_layers = []
                     w_vector = torch.tensor(w_vector)
                     w_vector = group["proj"](w_vector, self.temp) # should use def proj_simplex()
-                    new_lora_ranks = torch.floor(self.num_adapters * w_vector * self.default_lora_rank)
+                    new_lora_ranks = (self.num_adapters * w_vector * self.default_lora_rank).int()
                     j = 0
                     for i, p in enumerate(group["params"]):
                         if p.grad is None or i not in self.chosen_layers:
@@ -515,36 +515,37 @@ class FatAdamW(optim.Optimizer):
                         # играю в предположении, что лора А идет раньше лоры Б
 
                         if A_or_B == 1: # lora_A
-                            if self.lora_extention == "dummy":
-                                N = torch.rand_like(p.data, requires_grad=True)
-                                p.data = torch.concat([p.data, N], dim=1)
-                            elif self.lora_extention == "smart":
+                            if self.lora_extention == "smart":
                                 self.A = p
-                            elif self.lora_extention == "restart":
-                                N_1 = torch.rand_like(p.data, requires_grad=True)
-                                N_2 = torch.rand_like(p.data, requires_grad=True)
-                                p.data = torch.concat([N_1, N_2], dim=1)
+                            else:
+                                raise RuntimeError("you should run only smart optimizer")
                         else: # lora_B
-                            O = torch.zeros((self.lora_ranks[lora_idx] - p.data.shape[0], p.data.shape[1]), requires_grad=True, device=p.data.device)
-                            if self.lora_extention == "dummy":
-                                p.data = torch.concat([p.data, O], dim=0)
-                            elif self.lora_extention == "smart":
+
+                            if self.lora_extention == "smart":
                                 self.B = p
+
                                 if self.lora_ranks[lora_idx] == 0:
-                                    self.A.data = torch.zeros((self.A.data.shape[0], 1), requires_grad=False, device=self.A.data.device)
-                                    self.B.data = torch.zeros((1, self.B.data.shape[1]), requires_grad=False, device=self.B.data.device)
+                                    self.A.data = torch.zeros((self.A.data.shape[0], 0), requires_grad=False, device=self.A.data.device)
+                                    self.B.data = torch.zeros((0, self.B.data.shape[1]), requires_grad=False, device=self.B.data.device)
+
                                 elif self.lora_ranks[lora_idx] > cur_lora_rank:
                                     upgrade_lora_AB(self.A, self.B, self.lora_ranks[lora_idx])
+
                                 elif self.lora_ranks[lora_idx] < cur_lora_rank:
                                     downgrade_lora_AB(self.A, self.B, self.lora_ranks[lora_idx])
-                            elif self.lora_extention == "restart":
-                                p.data = torch.concat([O, O], dim=0)
+                            else:
+                                raise RuntimeError("you should run only smart optimizer")
                             
                             lora_idx += 1 # lora_B идет после lora_A, значит тут увеличиваем индекс для перехода к обработке новой лоры
 
-                        state["step"] = 0
-                        state["exp_avg"] = torch.zeros_like(p)
-                        state["exp_avg_sq"] = torch.zeros_like(p) 
+                            self.state[self.A]["step"] = 0
+                            self.state[self.A]["exp_avg"] = torch.zeros_like(self.A)
+                            self.state[self.A]["exp_avg_sq"] = torch.zeros_like(self.A) 
+
+                            self.state[self.B]["step"] = 0
+                            self.state[self.B]["exp_avg"] = torch.zeros_like(self.B)
+                            self.state[self.B]["exp_avg_sq"] = torch.zeros_like(self.B) 
+
                         continue
 
                     exp_avg.mul_(beta1).add_(grad, alpha=(1.0 - beta1))
