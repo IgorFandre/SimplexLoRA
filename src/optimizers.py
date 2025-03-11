@@ -422,12 +422,13 @@ class FatAdamW(optim.Optimizer):
         self.chosen_layers = list(range(num_adapters))
         self.lora_ranks = [default_lora_rank] * num_adapters # NEW
         self.default_lora_rank = default_lora_rank # NEW
-        if lora_extention not in ["smart", "dummy", "restart"]:
+        if lora_extention not in ["smart"]:
             raise ValueError(f"Wrong lora_extention: {lora_extention}")
         self.lora_extention = lora_extention
         self.fat_step = fat_step
         self.max_fat_steps = max_fat_steps
         self.R, self.R_mom, self.R_mom_sq = None, None, None
+        self.A, self.B = None, None
 
     @torch.no_grad()
     def step(self, closure: Callable = None):
@@ -487,6 +488,7 @@ class FatAdamW(optim.Optimizer):
                 for i, p in enumerate(group["params"]):
                     if p.grad is None:
                         continue
+
                     if (i // 2) not in self.chosen_layers and group["name"] == "loraAB": # WARNING !!! Why Andy divide i by 2 ???
                         continue
                         
@@ -515,14 +517,12 @@ class FatAdamW(optim.Optimizer):
                         # играю в предположении, что лора А идет раньше лоры Б
 
                         if A_or_B == 1: # lora_A
-                            if self.lora_extention == "smart":
-                                self.A = p
-                            else:
-                                raise RuntimeError("you should run only smart optimizer")
+                            self.A = p
+                                                        
                         else: # lora_B
+                            self.B = p
 
                             if self.lora_extention == "smart":
-                                self.B = p
 
                                 if self.lora_ranks[lora_idx] == 0:
                                     self.A.data = torch.zeros((self.A.data.shape[0], 0), requires_grad=False, device=self.A.data.device)
@@ -533,9 +533,8 @@ class FatAdamW(optim.Optimizer):
 
                                 elif self.lora_ranks[lora_idx] < cur_lora_rank:
                                     downgrade_lora_AB(self.A, self.B, self.lora_ranks[lora_idx])
-                            else:
-                                raise RuntimeError("you should run only smart optimizer")
                             
+                            # Общий код для двух способов
                             lora_idx += 1 # lora_B идет после lora_A, значит тут увеличиваем индекс для перехода к обработке новой лоры
 
                             self.state[self.A]["step"] = 0
