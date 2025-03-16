@@ -96,6 +96,7 @@ def main():
             fat_step=training_args.fat_step,
             max_fat_steps=training_args.max_fat_steps,
             lora_extention=training_args.lora_extention,
+            default_lora_rank=training_args.lora_r,
         )
 
     elif training_args.ft_strategy == "WeightLoRA":

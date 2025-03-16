@@ -468,7 +468,7 @@ class FatAdamW(optim.Optimizer):
             
             w_vector = torch.tensor(w_vector)
             w_vector = group["proj"](w_vector, self.temp)
-            # print(w_vector)
+            print(w_vector)
 
             j = 0
             for i, p in enumerate(group["params"]):
