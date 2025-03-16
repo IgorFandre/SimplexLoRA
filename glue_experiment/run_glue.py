@@ -40,9 +40,12 @@ def main():
     peft_args = utils.get_peft_arguments(training_args)
     if peft_args is not None:
         model = peft.get_peft_model(model, peft_args)
-    for name, param in model.named_parameters():
-        if "attention.self" not in name and "output.dense" not in name and "intermediate.dence" not in name:
-            param.requires_grad = False
+
+    # TODO check issue with specific linear layers
+    # for name, param in model.named_parameters():
+    #     if "attention.self" not in name and "output.dense" not in name and "intermediate.dence" not in name:
+    #         param.requires_grad = False
+
     num_peft_adapters = utils.count_atapters(model, training_args.ft_strategy)
     if training_args.ft_strategy == "WeightLoRA":
         if training_args.use_rand: 
@@ -61,20 +64,32 @@ def main():
         training_args.learning_rate = lr
     else:
         training_args.learning_rate = float(training_args.learning_rate)
+
     if training_args.ft_strategy == "FatLoRA":
-        weight_params, loraAB_params, other_params = [], [], []
+        weight_params = []
+        loraAB_params = []
+        lora_layers = []
+        
+        for name, module in model.named_modules():
+            if isinstance(module, peft.tuners.weight_lora.layer.WeightLoraLayer):
+                lora_layers.append(module)
+        
         for name, param in model.named_parameters():
-            if not param.requires_grad:
-                continue
+            # TODO check issue with specific linear layers
+            # if not param.requires_grad:
+            #     continue
+            if "weight_lora_A" in name or "weight_lora_B" in name:
+                loraAB_params.append(param)
             if "weight_lora_w" in name:
                 weight_params.append(param)
-            elif "weight_lora_A" in name or "weight_lora_B" in name:
-                loraAB_params.append(param)
+
         optimizer = optimizers.FatAdamW(
-            [{"params" : loraAB_params, "name" : "loraAB"},
-             {"params" : other_params,  "name" : "other_params"},
-             {"params" : weight_params, "proj" : optimizers.proj_0,
-              "lr" : training_args.learning_rate_w, "name" : "weight_params"}], 
+            [{"params" : loraAB_params,  "name" : "loraAB_params"},
+             {"params" : weight_params, "proj" : optimizers.proj_simplex,
+              "lr" : training_args.learning_rate_w, "name" : "weight_params"}],
+
+            lora_layers=lora_layers,
+
             lr=training_args.learning_rate,
             weight_decay=training_args.weight_decay,
             num_adapters=len(weight_params),
@@ -82,6 +97,7 @@ def main():
             max_fat_steps=training_args.max_fat_steps,
             lora_extention=training_args.lora_extention,
         )
+
     elif training_args.ft_strategy == "WeightLoRA":
         weight_params, other_params = [], []
         for name, param in model.named_parameters():

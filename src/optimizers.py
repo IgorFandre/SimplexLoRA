@@ -387,6 +387,7 @@ class FatAdamW(optim.Optimizer):
     def __init__(
         self,
         params,
+        lora_layers: list[torch.nn.Module],
         lr: float = 1e-3,
         betas: tuple[float, float] = (0.9, 0.999),
         eps: float = 1e-6,
@@ -394,7 +395,7 @@ class FatAdamW(optim.Optimizer):
         correct_bias: bool = True,
         no_deprecation_warning: bool = True,
         num_adapters: int = 36,
-        lora_extention: str = "dummy",
+        lora_extention: str = "smart",
         fat_step: int = 10,
         max_fat_steps: int = 3,
         default_lora_rank: int = 16 # NEW
@@ -406,6 +407,7 @@ class FatAdamW(optim.Optimizer):
                 " warning",
                 FutureWarning,
             )
+
         # require_version("torch>=1.5.0")  # add_ with alpha
         if lr < 0.0:
             raise ValueError(f"Invalid learning rate: {lr} - should be >= 0.0")
@@ -415,20 +417,24 @@ class FatAdamW(optim.Optimizer):
             raise ValueError(f"Invalid beta parameter: {betas[1]} - should be in [0.0, 1.0)")
         if not 0.0 <= eps:
             raise ValueError(f"Invalid epsilon value: {eps} - should be >= 0.0")
+        
         defaults = {"lr": lr, "betas": betas, "eps": eps, "weight_decay": weight_decay, "correct_bias": correct_bias}
         super().__init__(params, defaults)
+
+        self.lora_layers = lora_layers
+
         self.temp = 1 # WARNING !!!
-        self.num_adapters = num_adapters # NEW
+        self.num_adapters = num_adapters
         self.chosen_layers = list(range(num_adapters))
-        self.lora_ranks = [default_lora_rank] * num_adapters # NEW
-        self.default_lora_rank = default_lora_rank # NEW
+        self.lora_ranks = [default_lora_rank] * num_adapters
+        self.default_lora_rank = default_lora_rank
+
         if lora_extention not in ["smart"]:
             raise ValueError(f"Wrong lora_extention: {lora_extention}")
         self.lora_extention = lora_extention
+
         self.fat_step = fat_step
         self.max_fat_steps = max_fat_steps
-        self.R, self.R_mom, self.R_mom_sq = None, None, None
-        self.A, self.B = None, None
 
     @torch.no_grad()
     def step(self, closure: Callable = None):
@@ -441,125 +447,136 @@ class FatAdamW(optim.Optimizer):
         loss = None
         if closure is not None:
             loss = closure()
-        
-        for group in self.param_groups:
-            if group["name"] != "weight_params":
-                continue
-            ######################## StoIHT step for w #########################
-            if self.max_fat_steps == 0: 
-                self.max_fat_steps -= 1
-            if self.max_fat_steps > 0:
-                w_vector = []
-                if "w_step" not in group.keys(): 
-                    group["w_step"] = 0
-                group["w_step"] += 1
+ 
+        ######################## StoIHT step for lora weights #########################
+        if self.max_fat_steps > 0:
+            # weight_params group
+            group = list(filter(lambda group: group["name"] == "weight_params", self.param_groups))[0]
+
+            w_vector = []
+
+            if "w_step" not in group.keys(): 
+                group["w_step"] = 0
+            group["w_step"] += 1
+
+            for i, p in enumerate(group["params"]):
+                if p.grad is None or i not in self.chosen_layers:
+                    continue
+
+                p.add_(p.grad, alpha=-group['lr'])
+                w_vector.append(p.data.item())
+            
+            w_vector = torch.tensor(w_vector)
+            w_vector = group["proj"](w_vector, self.temp)
+            # print(w_vector)
+
+            j = 0
+            for i, p in enumerate(group["params"]):
+                if p.grad is None or i not in self.chosen_layers:
+                    continue
+
+                p.data = torch.tensor([w_vector[j]], device=p.device)
+                j += 1
+
+            if group["w_step"] % self.fat_step == 0:
+                # self.temp *= 2 # need to update temperature
+
+                new_chosen_layers = []
+                new_lora_ranks = (self.num_adapters * w_vector * self.default_lora_rank).int()
+
+                j = 0
                 for i, p in enumerate(group["params"]):
                     if p.grad is None or i not in self.chosen_layers:
                         continue
-                    p.add_(p.grad, alpha=-group['lr'])
-                    if group["w_step"] % self.fat_step == 0:
-                        w_vector.append(p.data.item())
 
-                if group["w_step"] % self.fat_step == 0:
-                    # self.temp *= 2 # need to update temperature
-                    self.max_fat_steps -= 1
-                    new_chosen_layers = []
-                    w_vector = torch.tensor(w_vector)
-                    w_vector = group["proj"](w_vector, self.temp) # should use def proj_simplex()
-                    new_lora_ranks = (self.num_adapters * w_vector * self.default_lora_rank).int()
-                    j = 0
-                    for i, p in enumerate(group["params"]):
-                        if p.grad is None or i not in self.chosen_layers:
-                            continue
-                        if new_lora_ranks[j] > 0: 
-                            new_chosen_layers.append(i)
-                        p.data = torch.tensor([w_vector[j]], device=p.device)
-                        j += 1
-                    self.chosen_layers = new_chosen_layers
-                    self.lora_ranks = new_lora_ranks
-                    print("$$$$$$$$", self.chosen_layers, "$$$$$$$$")
-            ####################################################################
+                    if new_lora_ranks[j] > 0: 
+                        new_chosen_layers.append(i)
+                        
+                    j += 1
+
+                self.chosen_layers = new_chosen_layers
+                self.lora_ranks = new_lora_ranks
+
+                print("New chosen layers:", self.chosen_layers)
+        ####################################################################
         
-        lora_idx = 0
+        lora_rank_update = False
 
+        ############################ Adam Step for all (lora also) other layers #############################
         for group in self.param_groups:
-            if group["name"] != "weight_params":
-            ############################ Adam Step #############################
-                for i, p in enumerate(group["params"]):
-                    if p.grad is None:
-                        continue
+            if group["name"] == "weight_params":
+                continue
+            
+            for i, p in enumerate(group["params"]):
+                if p.grad is None:
+                    continue
 
-                    if (i // 2) not in self.chosen_layers and group["name"] == "loraAB": # WARNING !!! Why Andy divide i by 2 ???
-                        continue
-                        
-                    grad = p.grad
-                    if grad.is_sparse:
-                        raise RuntimeError("Adam does not support sparse gradients, please consider SparseAdam instead")
+                # TODO check if not active lora
+                # if (i // 2) not in self.chosen_layers and group["name"] == "loraAB_params": # WARNING !!! Why divide i by 2 ???
+                #     continue
+                    
+                grad = p.grad
+                if grad.is_sparse:
+                    raise RuntimeError("Adam does not support sparse gradients, please consider SparseAdam instead")
 
-                    state = self.state[p]
-                    # State initialization
-                    if len(state) == 0:
-                        state["step"] = 0
-                        # Exponential moving average of gradient values
-                        state["exp_avg"] = torch.zeros_like(p)
-                        # Exponential moving average of squared gradient values
-                        state["exp_avg_sq"] = torch.zeros_like(p)       
+                state = self.state[p]
+                # State initialization
+                if len(state) == 0:
+                    state["step"] = 0
+                    # Exponential moving average of gradient values
+                    state["exp_avg"] = torch.zeros_like(p)
+                    # Exponential moving average of squared gradient values
+                    state["exp_avg_sq"] = torch.zeros_like(p)       
 
-                    exp_avg, exp_avg_sq = state["exp_avg"], state["exp_avg_sq"]
-                    beta1, beta2 = group["betas"]
+                exp_avg, exp_avg_sq = state["exp_avg"], state["exp_avg_sq"]
+                beta1, beta2 = group["betas"]
 
-                    state["step"] += 1
+                state["step"] += 1
 
-                    if group["name"] == "loraAB" and state["step"] % self.fat_step == 0 and self.max_fat_steps >= 0:
-                        A_or_B = np.argmin(p.data.shape)
-                        cur_lora_rank = np.min(p.data.shape)
-                        
-                        # играю в предположении, что лора А идет раньше лоры Б
+                if group["name"] == "loraAB_params" and state["step"] % self.fat_step == 0 and self.max_fat_steps > 0:
+                    lora_rank_update = True
+                    continue
 
-                        if A_or_B == 1: # lora_A
-                            self.A = p
-                                                        
-                        else: # lora_B
-                            self.B = p
+                exp_avg.mul_(beta1).add_(grad, alpha=(1.0 - beta1))
+                exp_avg_sq.mul_(beta2).addcmul_(grad, grad, value=1.0 - beta2)
+                denom = exp_avg_sq.sqrt().add_(group["eps"])
 
-                            if self.lora_extention == "smart":
+                step_size = group["lr"]
+                if group["correct_bias"]:  # No bias correction for Bert
+                    bias_correction1 = 1.0 - beta1 ** state["step"]
+                    bias_correction2 = 1.0 - beta2 ** state["step"]
+                    step_size = step_size * math.sqrt(bias_correction2) / bias_correction1
 
-                                if self.lora_ranks[lora_idx] == 0:
-                                    self.A.data = torch.zeros((self.A.data.shape[0], 0), requires_grad=False, device=self.A.data.device)
-                                    self.B.data = torch.zeros((0, self.B.data.shape[1]), requires_grad=False, device=self.B.data.device)
+                p.addcdiv_(exp_avg, denom, value=-step_size)
+                if group["weight_decay"] > 0.0:
+                    p.add_(p, alpha=(-group["lr"] * group["weight_decay"]))
 
-                                elif self.lora_ranks[lora_idx] > cur_lora_rank:
-                                    upgrade_lora_AB(self.A, self.B, self.lora_ranks[lora_idx])
+        ############################ Rank update for lor a layers #############################
+        if not lora_rank_update:
+            return loss
+        
+        self.max_fat_steps -= 1
 
-                                elif self.lora_ranks[lora_idx] < cur_lora_rank:
-                                    downgrade_lora_AB(self.A, self.B, self.lora_ranks[lora_idx])
-                            
-                            # Общий код для двух способов
-                            lora_idx += 1 # lora_B идет после lora_A, значит тут увеличиваем индекс для перехода к обработке новой лоры
+        for i, layer in enumerate(self.lora_layers):
+            # layer._active_adapter == ['default']
+            adapter_name = layer._active_adapter[0]
 
-                            self.state[self.A]["step"] = 0
-                            self.state[self.A]["exp_avg"] = torch.zeros_like(self.A)
-                            self.state[self.A]["exp_avg_sq"] = torch.zeros_like(self.A) 
+            if self.max_fat_steps == 0:
+                layer.final_lora_rank_update(self.lora_ranks[i], adapter_name)
+            else:
+                layer.update_lora_rank_QR(self.lora_ranks[i], adapter_name)
+            
+            w_A = layer.weight_lora_A[adapter_name]
+            w_B = layer.weight_lora_B[adapter_name]
+            
+            self.state[w_A]["step"] = 0
+            self.state[w_A]["exp_avg"] = torch.zeros_like(w_A)
+            self.state[w_A]["exp_avg_sq"] = torch.zeros_like(w_A) 
 
-                            self.state[self.B]["step"] = 0
-                            self.state[self.B]["exp_avg"] = torch.zeros_like(self.B)
-                            self.state[self.B]["exp_avg_sq"] = torch.zeros_like(self.B) 
+            self.state[w_B]["step"] = 0
+            self.state[w_B]["exp_avg"] = torch.zeros_like(w_B)
+            self.state[w_B]["exp_avg_sq"] = torch.zeros_like(w_B) 
 
-                        continue
-
-                    exp_avg.mul_(beta1).add_(grad, alpha=(1.0 - beta1))
-                    exp_avg_sq.mul_(beta2).addcmul_(grad, grad, value=1.0 - beta2)
-                    denom = exp_avg_sq.sqrt().add_(group["eps"])
-
-                    step_size = group["lr"]
-                    if group["correct_bias"]:  # No bias correction for Bert
-                        bias_correction1 = 1.0 - beta1 ** state["step"]
-                        bias_correction2 = 1.0 - beta2 ** state["step"]
-                        step_size = step_size * math.sqrt(bias_correction2) / bias_correction1
-
-                    p.addcdiv_(exp_avg, denom, value=-step_size)
-                    if group["weight_decay"] > 0.0:
-                        p.add_(p, alpha=(-group["lr"] * group["weight_decay"]))
         return loss
     
 class WeightAdamW(optim.Optimizer):

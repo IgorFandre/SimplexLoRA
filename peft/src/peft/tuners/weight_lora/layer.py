@@ -172,6 +172,88 @@ class WeightLoraLayer(nn.Module, LycorisLayer):
         result = result.to(previous_dtype)
         return result
 
+    def update_lora_rank_QR(self, new_rank, adapter_name):
+        # A: m x r, B: r x n, W (base): n x m
+        device = self.weight_lora_B[adapter_name].device
+        w_A = self.weight_lora_A[adapter_name]
+        w_B = self.weight_lora_B[adapter_name]
+
+        current_rank = self.r[adapter_name]
+        n, m = self.get_base_layer().weight.shape
+
+        if new_rank == 0:
+            # why not?
+            self.get_base_layer().weight += self.get_delta_weight(adapter_name)
+
+            # TODO check for bugs
+            # self.disable_adapters = True
+            self.weight_lora_A[adapter_name].data = torch.zeros((m, 0), requires_grad=False, device=device)
+            self.weight_lora_B[adapter_name].data = torch.zeros((0, n), requires_grad=False, device=device)
+            
+        elif new_rank > current_rank:
+            Q, R = torch.linalg.qr(w_A, mode="reduced")
+            N = torch.randn((m, new_rank - current_rank), device=device)
+            I = torch.eye(m, device=device)
+            O = torch.zeros((new_rank - current_rank, n), device=device)
+
+            self.weight_lora_A[adapter_name].data = torch.concat([Q, (I - Q @ Q.T) @ N], dim=1)
+            self.weight_lora_B[adapter_name].data = torch.concat([R @ w_B, O], dim=0)
+
+            self.weight_lora_A[adapter_name].requires_grad = True
+            self.weight_lora_B[adapter_name].requires_grad = True
+
+        elif new_rank < current_rank:
+            Q_A, R_A = torch.linalg.qr(w_A, mode="reduced")
+            Q_B, R_B = torch.linalg.qr(w_B.T, mode="reduced")
+            U, S, V = torch.linalg.svd(R_A @ R_B.T)
+
+            dim_S = current_rank
+            if len(S) < dim_S:
+                S = torch.diag(
+                    torch.concat((S, torch.zeros(dim_S - len(S), device=device)))
+                )[:dim_S, :dim_S]
+            else:
+                S = torch.diag(S)
+
+            U_r = U[:, :new_rank]
+            S_r = S[:new_rank, :new_rank]
+            V_r = V[:new_rank, :]
+
+            self.weight_lora_A[adapter_name].data = Q_A @ U_r
+            self.weight_lora_B[adapter_name].data = S_r @ V_r @ Q_B.T
+
+            self.weight_lora_A[adapter_name].requires_grad = True
+            self.weight_lora_B[adapter_name].requires_grad = True
+
+        self.r[adapter_name] = new_rank
+
+        if new_rank == 0:
+            self.scaling[adapter_name] = 0
+        else:
+            self.scaling[adapter_name] = self.lora_alpha[adapter_name] / new_rank
+                        
+
+    def final_lora_rank_update(self, new_rank, adapter_name):
+        # A: m x r, B: r x n, W (base): n x m
+        device = self.weight_lora_B[adapter_name].device
+
+        n, m = self.get_base_layer().weight.shape
+
+        self.get_base_layer().weight += self.get_delta_weight(adapter_name)
+
+        self.weight_lora_A[adapter_name].data = torch.randn((m, new_rank), requires_grad=True, device=device)
+        self.weight_lora_B[adapter_name].data = torch.zeros((new_rank, n), requires_grad=True, device=device)
+        self.weight_lora_w[adapter_name].data = torch.tensor(1., requires_grad=False, device=device)
+
+        self.r[adapter_name] = new_rank
+
+        if new_rank == 0:
+            self.scaling[adapter_name] = 0
+        else:
+            self.scaling[adapter_name] = self.lora_alpha[adapter_name] / new_rank
+
+        self.weight_lora_w[adapter_name].data = torch.tensor(1., requires_grad=False, device=device)
+
 
 class Linear(WeightLoraLayer):
     """WeightLora implemented in Linear layer"""

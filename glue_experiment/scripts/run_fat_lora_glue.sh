@@ -7,7 +7,7 @@ do
     do
         for seed in 18
         do
-            CUDA_VISIBLE_DEVICES=6 python ./glue_experiment/run_glue.py \
+            CUDA_VISIBLE_DEVICES=2 python ./glue_experiment/run_glue.py \
                 --dataset_name glue \
                 --task_name mrpc \
                 --model_name_or_path microsoft/deberta-v3-base \
@@ -26,7 +26,7 @@ do
                 --lora_dropout 0.05 \
                 --lora_alpha 32 \
                 --use_fat true \
-                --fat_step 10 \
+                --fat_step 30 \
                 --max_fat_steps 2 \
                 --lora_extention smart \
                 --seed $seed \
