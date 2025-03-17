@@ -186,6 +186,7 @@ class WeightLoraLayer(nn.Module, LycorisLayer):
             self.get_base_layer().weight += self.get_delta_weight(adapter_name)
 
             # TODO check for bugs
+            # TODO disable_adapters 
             # self.disable_adapters = True
             self.weight_lora_A[adapter_name].data = torch.zeros((m, 0), requires_grad=False, device=device)
             self.weight_lora_B[adapter_name].data = torch.zeros((0, n), requires_grad=False, device=device)
@@ -239,8 +240,10 @@ class WeightLoraLayer(nn.Module, LycorisLayer):
 
         n, m = self.get_base_layer().weight.shape
 
+        # TODO multiply dropout
         self.get_base_layer().weight += self.get_delta_weight(adapter_name)
 
+        # TODO rank 0 case
         self.weight_lora_A[adapter_name].data = torch.randn((m, new_rank), requires_grad=True, device=device)
         self.weight_lora_B[adapter_name].data = torch.zeros((new_rank, n), requires_grad=True, device=device)
         self.weight_lora_w[adapter_name].data = torch.tensor(1., requires_grad=False, device=device)
@@ -251,8 +254,6 @@ class WeightLoraLayer(nn.Module, LycorisLayer):
             self.scaling[adapter_name] = 0
         else:
             self.scaling[adapter_name] = self.lora_alpha[adapter_name] / new_rank
-
-        self.weight_lora_w[adapter_name].data = torch.tensor(1., requires_grad=False, device=device)
 
 
 class Linear(WeightLoraLayer):

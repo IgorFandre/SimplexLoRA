@@ -466,6 +466,7 @@ class FatAdamW(optim.Optimizer):
                 p.add_(p.grad, alpha=-group['lr'])
                 w_vector.append(p.data.item())
             
+            # TODO check projection
             w_vector = torch.tensor(w_vector)
             w_vector = group["proj"](w_vector, self.temp)
             print(w_vector)
@@ -558,6 +559,7 @@ class FatAdamW(optim.Optimizer):
         self.max_fat_steps -= 1
 
         for i, layer in enumerate(self.lora_layers):
+            # TODO check if type(layer._active_adapter) == 'str'
             # layer._active_adapter == ['default']
             adapter_name = layer._active_adapter[0]
 

@@ -71,6 +71,7 @@ def main():
         lora_layers = []
         
         for name, module in model.named_modules():
+            # TODO check base_layer name or smth else
             if isinstance(module, peft.tuners.weight_lora.layer.WeightLoraLayer):
                 lora_layers.append(module)
         
