@@ -74,6 +74,9 @@ def main():
             # TODO check base_layer name or smth else
             if isinstance(module, peft.tuners.weight_lora.layer.WeightLoraLayer):
                 lora_layers.append(module)
+
+                adapter_name = module._active_adapter[0]
+                module.update_alpha(num_peft_adapters, adapter_name)
         
         for name, param in model.named_parameters():
             # TODO check issue with specific linear layers
@@ -130,7 +133,7 @@ def main():
     training_args.peft_params = training_args.all_params - all_params_before_peft
     training_args.train_proportion = training_args.trainable_params / training_args.all_params * 100 
     training_args.peft_proportion = training_args.peft_params / training_args.all_params * 100 
-    os.environ["WANDB_PROJECT"] = "SBER_LORA"
+    os.environ["WANDB_PROJECT"] = "FAT_LORA"
     if training_args.ft_strategy in ["WeightLoRA", "RandLoRA"]:
         run_name = f"[{training_args.ft_strategy} k={training_args.k} r={training_args.lora_r}]"
     else:

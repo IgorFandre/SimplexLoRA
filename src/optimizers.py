@@ -450,6 +450,9 @@ class FatAdamW(optim.Optimizer):
  
         ######################## StoIHT step for lora weights #########################
         if self.max_fat_steps > 0:
+            # TODO fix_temp
+            if 0.1 < self.temp < 10:
+                self.temp *= 0.8 # need to update temperature
             # weight_params group
             group = list(filter(lambda group: group["name"] == "weight_params", self.param_groups))[0]
 
@@ -466,10 +469,10 @@ class FatAdamW(optim.Optimizer):
                 p.add_(p.grad, alpha=-group['lr'])
                 w_vector.append(p.data.item())
             
-            # TODO check projection
             w_vector = torch.tensor(w_vector)
+            print(f"before {w_vector}")
             w_vector = group["proj"](w_vector, self.temp)
-            print(w_vector)
+            print(f"after {w_vector}")
 
             j = 0
             for i, p in enumerate(group["params"]):
@@ -480,8 +483,6 @@ class FatAdamW(optim.Optimizer):
                 j += 1
 
             if group["w_step"] % self.fat_step == 0:
-                # self.temp *= 2 # need to update temperature
-
                 new_chosen_layers = []
                 new_lora_ranks = (self.num_adapters * w_vector * self.default_lora_rank).int()
 
@@ -565,6 +566,7 @@ class FatAdamW(optim.Optimizer):
 
             if self.max_fat_steps == 0:
                 layer.final_lora_rank_update(self.lora_ranks[i], adapter_name)
+                layer.update_alpha(1 / len(self.lora_layers), adapter_name)
             else:
                 layer.update_lora_rank_QR(self.lora_ranks[i], adapter_name)
             

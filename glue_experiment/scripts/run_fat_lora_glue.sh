@@ -26,7 +26,7 @@ do
                 --lora_dropout 0.05 \
                 --lora_alpha 32 \
                 --use_fat true \
-                --fat_step 45 \
+                --fat_step 35 \
                 --max_fat_steps 2 \
                 --lora_extention smart \
                 --seed $seed \

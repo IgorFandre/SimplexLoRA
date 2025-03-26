@@ -204,11 +204,14 @@ class WeightLoraLayer(nn.Module, LycorisLayer):
             self.weight_lora_B[adapter_name].requires_grad = True
 
         elif new_rank < current_rank:
+            # TODO debug
             Q_A, R_A = torch.linalg.qr(w_A, mode="reduced")
             Q_B, R_B = torch.linalg.qr(w_B.T, mode="reduced")
             U, S, V = torch.linalg.svd(R_A @ R_B.T)
+            print("Q_A, Q_B, R_A, R_B: ", Q_A.shape, Q_B.shape, R_A.shape, R_B.shape)
+            print("before: ", U.shape, S.shape, V.shape, new_rank)
 
-            dim_S = current_rank
+            dim_S = new_rank
             if len(S) < dim_S:
                 S = torch.diag(
                     torch.concat((S, torch.zeros(dim_S - len(S), device=device)))
@@ -219,6 +222,9 @@ class WeightLoraLayer(nn.Module, LycorisLayer):
             U_r = U[:, :new_rank]
             S_r = S[:new_rank, :new_rank]
             V_r = V[:new_rank, :]
+
+            print("after: ", U.shape, S.shape, V.shape)
+
 
             self.weight_lora_A[adapter_name].data = Q_A @ U_r
             self.weight_lora_B[adapter_name].data = S_r @ V_r @ Q_B.T
@@ -254,6 +260,10 @@ class WeightLoraLayer(nn.Module, LycorisLayer):
             self.scaling[adapter_name] = 0
         else:
             self.scaling[adapter_name] = self.lora_alpha[adapter_name] / new_rank
+    
+    def update_alpha(self, multiplier, adapter_name):
+        self.lora_alpha[adapter_name] *= multiplier
+        self.scaling[adapter_name] = self.lora_alpha[adapter_name] / self.r[adapter_name]
 
 
 class Linear(WeightLoraLayer):
