@@ -393,7 +393,7 @@ class LoraLayer(BaseTunerLayer):
 
         return result
 
-    def update_lora_rank_QR(self, new_rank, adapter_name):
+    def _update_lora_rank_QR(self, new_rank, adapter_name):
         # lora_A: r x m, lora_B: n x r, W (base): n x m        
         # A: m x r, B: r x n, W (base): n x m        
         lora_A = self.lora_A[adapter_name].weight.T
@@ -412,6 +412,9 @@ class LoraLayer(BaseTunerLayer):
             # self.disable_adapters = True
             lora_A.data = torch.zeros((0, m), requires_grad=False, device=device)
             lora_B.data = torch.zeros((n, 0), requires_grad=False, device=device)
+
+            self.lora_A[adapter_name].weight.data = lora_A.data
+            self.lora_B[adapter_name].weight.data = lora_B.data
             
         elif new_rank > current_rank:
             Q, R = torch.linalg.qr(lora_A, mode="reduced")
@@ -419,8 +422,11 @@ class LoraLayer(BaseTunerLayer):
             I = torch.eye(m, device=device)
             O = torch.zeros((new_rank - current_rank, n), device=device)
 
-            lora_A.data = torch.concat([Q, (I - Q @ Q.T) @ N], dim=1).T
-            lora_B.data = torch.concat([R @ lora_B, O], dim=0).T
+            lora_A.data = torch.concat([Q, (I - Q @ Q.T) @ N], dim=1)
+            lora_B.data = torch.concat([R @ lora_B, O], dim=0)
+
+            self.lora_A[adapter_name].weight.data = lora_A.data.T
+            self.lora_B[adapter_name].weight.data = lora_B.data.T
 
             lora_A.requires_grad = True
             lora_B.requires_grad = True
@@ -450,11 +456,12 @@ class LoraLayer(BaseTunerLayer):
             lora_A.data = Q_A @ U_r
             lora_B.data = S_r @ V_r @ Q_B.T
 
-            lora_A.data = lora_A.data.T
-            lora_B.data = lora_B.data.T
+            self.lora_A[adapter_name].weight.data = lora_A.data.T
+            self.lora_B[adapter_name].weight.data = lora_B.data.T
 
             lora_A.requires_grad = True
             lora_B.requires_grad = True
+        
 
         self.r[adapter_name] = new_rank
 
@@ -464,7 +471,7 @@ class LoraLayer(BaseTunerLayer):
             self.scaling[adapter_name] = self.lora_alpha[adapter_name] / new_rank
                         
 
-    def final_lora_rank_update(self, new_rank, adapter_name):
+    def _final_lora_rank_update(self, new_rank, adapter_name):
         # A: m x r, B: r x n, W (base): n x m
         device = self.lora_A[adapter_name].weight.device
 
@@ -484,10 +491,6 @@ class LoraLayer(BaseTunerLayer):
             self.scaling[adapter_name] = 0
         else:
             self.scaling[adapter_name] = self.lora_alpha[adapter_name] / new_rank
-    
-    def update_alpha(self, multiplier, adapter_name):
-        self.lora_alpha[adapter_name] *= multiplier
-        self.scaling[adapter_name] = self.lora_alpha[adapter_name] / self.r[adapter_name]
 
 
 # Below code is based on https://github.com/microsoft/LoRA/blob/main/loralib/layers.py

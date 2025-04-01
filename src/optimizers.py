@@ -454,8 +454,8 @@ class FatAdamW(optim.Optimizer):
         ######################## StoIHT step for lora weights #########################
         if self.max_fat_steps > 0:
             # TODO fix_temp
-            if 0.1 < self.temp < 10:
-                self.temp *= 0.8 # need to update temperature
+            # if 0.8 < self.temp:
+            #     self.temp *= 0.9 # need to update temperature
             # weight_params group
             group = list(filter(lambda group: group["name"] == "weight_params", self.param_groups))[0]
 
@@ -473,9 +473,9 @@ class FatAdamW(optim.Optimizer):
                 w_vector.append(p.data.item())
             
             w_vector = torch.tensor(w_vector)
-            print(f"before {w_vector}")
-            w_vector = group["proj"](w_vector, self.temp)
-            print(f"after {w_vector}")
+            print(f"before proj {w_vector}")
+            w_vector = group["proj"](w_vector, self.temp) * len(self.chosen_layers)
+            print(f"after proj {w_vector}")
 
             j = 0
             for i, p in enumerate(group["params"]):
@@ -558,11 +558,12 @@ class FatAdamW(optim.Optimizer):
 
         ############################ Rank update for lor a layers #############################
 
-        for i, layer in enumerate(self.lora_layers):
-            adapter_name = layer._active_adapter[0]
-            print("A:", layer.lora_A[adapter_name].weight)
-            print("B:", layer.lora_B[adapter_name].weight)
-            break
+        # for i, layer in enumerate(self.lora_layers):
+        #     adapter_name = layer._active_adapter[0]
+        #     print("A grad:", layer.lora_A[adapter_name].weight.grad)
+        #     print("A:", layer.lora_A[adapter_name].weight)
+        #     print("B:", layer.lora_B[adapter_name].weight)
+        #     break
 
         if not lora_rank_update:
             return loss
@@ -575,10 +576,9 @@ class FatAdamW(optim.Optimizer):
             adapter_name = layer._active_adapter[0]
 
             if self.max_fat_steps == 0:
-                layer.final_lora_rank_update(self.lora_ranks[i], adapter_name)
-                layer.update_alpha(1 / len(self.lora_layers), adapter_name)
+                layer._final_lora_rank_update(self.lora_ranks[i], adapter_name)
             else:
-                layer.update_lora_rank_QR(self.lora_ranks[i], adapter_name)
+                layer._update_lora_rank_QR(self.lora_ranks[i], adapter_name)
             
             lora_A = layer.lora_A[adapter_name].weight
             lora_B = layer.lora_B[adapter_name].weight

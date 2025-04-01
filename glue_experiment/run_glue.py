@@ -47,7 +47,6 @@ def main():
     #         param.requires_grad = False
 
     num_peft_adapters = utils.count_atapters(model, training_args.ft_strategy)
-    print(num_peft_adapters)
     if training_args.ft_strategy == "WeightLoRA":
         if training_args.use_rand: 
             training_args.ft_strategy = "RandLoRA"
@@ -77,13 +76,7 @@ def main():
             if isinstance(module, peft.tuners.lora.layer.LoraLayer):
                 lora_layers.append(module)
 
-                adapter_name = module._active_adapter[0]
-                module.update_alpha(num_peft_adapters, adapter_name)
-        
         for name, param in model.named_parameters():
-            # TODO check issue with specific linear layers
-            # if not param.requires_grad:
-            #     continue
             if "lora_A" in name or "lora_B" in name:
                 loraAB_params.append(param)
             if "lora_weight" in name:

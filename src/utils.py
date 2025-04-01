@@ -134,7 +134,9 @@ def get_peft_arguments(training_args):
     if training_args.model_name in ["microsoft/deberta-v3-base"]:
         # peft_args.target_modules = ["query_proj", "key_proj", "value_proj",
         #                             "intermediate.dence", "output.dence"]
-        peft_args.target_modules = "all-linear"
+        peft_args.target_modules = ["query_proj", "key_proj", "value_proj",
+                                    "intermediate.dense", "output.dense"]
+        # peft_args.target_modules = "all-linear"
     elif training_args.model_name in ["facebook/bart-large"]:
         # peft_args.target_modules = ["q_proj", "k_proj", "v_proj", "o_proj",
         #                             "gate_proj", "up_proj", "down_proj", 
