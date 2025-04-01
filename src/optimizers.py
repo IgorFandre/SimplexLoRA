@@ -1,22 +1,23 @@
-import torch
 import math
-import numpy as np
-import torch.optim as optim
 import warnings
 from typing import Callable
 
+import numpy as np
+import torch
+import torch.optim as optim
+
 ############################### torch optimizers ###############################
-'''
+"""
 LAMB optimizer: torch_optimizer.Lamb(model.parameters(), lr=0.001)
 LAMB scheduler: vanilla linear (?) 
 Prodigy optimizer: prodigyopt.Prodigy(model.parameters(), lr=1.)
 Prodijy scheduler: torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=max_steps)
 DAdaptAdam optimizer: dadaptation.DAdaptAdam(model.parameters(), lr=1.)
 DAdaptAdam scheduler: same as for Prodijy optimizer (?)
-'''
+"""
 ################################################################################
-########### hugging face scheduler 
-'''
+########### hugging face scheduler
+"""
     - "linear" = get_linear_schedule_with_warmup
     - "cosine" = get_cosine_schedule_with_warmup
     - "cosine_with_restarts" = get_cosine_with_hard_restarts_schedule_with_warmup
@@ -27,7 +28,8 @@ DAdaptAdam scheduler: same as for Prodijy optimizer (?)
     - "reduce_lr_on_plateau" = get_reduce_on_plateau_schedule
     - "cosine_with_min_lr" = get_cosine_with_min_lr_schedule_with_warmup
     - "warmup_stable_decay" = get_wsd_schedule
-'''
+"""
+
 
 # from https://github.com/jxbz/signSGD/blob/master/signSGD_zeros.ipynb
 class signSGD(optim.Optimizer):
@@ -46,19 +48,22 @@ class signSGD(optim.Optimizer):
         if closure is not None:
             loss = closure()
         for group in self.param_groups:
-            for p in group['params']:
+            for p in group["params"]:
                 if p.grad is None:
                     continue
                 # take sign of gradient
                 grad = torch.sign(p.grad)
                 # randomise zero gradients to ±1
                 if self.rand_zero:
-                    grad[grad==0] = torch.randint_like(grad[grad==0], low=0, high=2)*2 - 1
-                    assert not (grad==0).any()
+                    grad[grad == 0] = (
+                        torch.randint_like(grad[grad == 0], low=0, high=2) * 2 - 1
+                    )
+                    assert not (grad == 0).any()
                 # make update
-                p.data -= group['lr'] * grad
+                p.data -= group["lr"] * grad
         return loss
-    
+
+
 class signAdamW(optim.Optimizer):
     def __init__(
         self,
@@ -69,7 +74,7 @@ class signAdamW(optim.Optimizer):
         weight_decay: float = 0.0,
         correct_bias: bool = True,
         no_deprecation_warning: bool = True,
-        rand_zero: bool = True
+        rand_zero: bool = True,
     ):
         if not no_deprecation_warning:
             warnings.warn(
@@ -79,12 +84,22 @@ class signAdamW(optim.Optimizer):
         if lr < 0.0:
             raise ValueError(f"Invalid learning rate: {lr} - should be >= 0.0")
         if not 0.0 <= betas[0] < 1.0:
-            raise ValueError(f"Invalid beta parameter: {betas[0]} - should be in [0.0, 1.0)")
+            raise ValueError(
+                f"Invalid beta parameter: {betas[0]} - should be in [0.0, 1.0)"
+            )
         if not 0.0 <= betas[1] < 1.0:
-            raise ValueError(f"Invalid beta parameter: {betas[1]} - should be in [0.0, 1.0)")
+            raise ValueError(
+                f"Invalid beta parameter: {betas[1]} - should be in [0.0, 1.0)"
+            )
         if not 0.0 <= eps:
             raise ValueError(f"Invalid epsilon value: {eps} - should be >= 0.0")
-        defaults = {"lr": lr, "betas": betas, "eps": eps, "weight_decay": weight_decay, "correct_bias": correct_bias}
+        defaults = {
+            "lr": lr,
+            "betas": betas,
+            "eps": eps,
+            "weight_decay": weight_decay,
+            "correct_bias": correct_bias,
+        }
         self.rand_zero = rand_zero
         super().__init__(params, defaults)
 
@@ -103,11 +118,15 @@ class signAdamW(optim.Optimizer):
                 grad = torch.sign(p.grad)
                 # randomise zero gradients to ±1
                 if self.rand_zero:
-                    grad[grad==0] = torch.randint_like(grad[grad==0], low=0, high=2)*2 - 1
-                    assert not (grad==0).any()
+                    grad[grad == 0] = (
+                        torch.randint_like(grad[grad == 0], low=0, high=2) * 2 - 1
+                    )
+                    assert not (grad == 0).any()
                 ################################################################
                 if grad.is_sparse:
-                    raise RuntimeError("Adam does not support sparse gradients, please consider SparseAdam instead")
+                    raise RuntimeError(
+                        "Adam does not support sparse gradients, please consider SparseAdam instead"
+                    )
 
                 state = self.state[p]
 
@@ -134,7 +153,9 @@ class signAdamW(optim.Optimizer):
                 if group["correct_bias"]:  # No bias correction for Bert
                     bias_correction1 = 1.0 - beta1 ** state["step"]
                     bias_correction2 = 1.0 - beta2 ** state["step"]
-                    step_size = step_size * math.sqrt(bias_correction2) / bias_correction1
+                    step_size = (
+                        step_size * math.sqrt(bias_correction2) / bias_correction1
+                    )
 
                 p.addcdiv_(exp_avg, denom, value=-step_size)
 
@@ -142,7 +163,8 @@ class signAdamW(optim.Optimizer):
                     p.add_(p, alpha=(-group["lr"] * group["weight_decay"]))
 
         return loss
-    
+
+
 class AdamW(optim.Optimizer):
     """
     Implements Adam algorithm with weight decay fix as introduced in [Decoupled Weight Decay
@@ -186,12 +208,22 @@ class AdamW(optim.Optimizer):
         if lr < 0.0:
             raise ValueError(f"Invalid learning rate: {lr} - should be >= 0.0")
         if not 0.0 <= betas[0] < 1.0:
-            raise ValueError(f"Invalid beta parameter: {betas[0]} - should be in [0.0, 1.0)")
+            raise ValueError(
+                f"Invalid beta parameter: {betas[0]} - should be in [0.0, 1.0)"
+            )
         if not 0.0 <= betas[1] < 1.0:
-            raise ValueError(f"Invalid beta parameter: {betas[1]} - should be in [0.0, 1.0)")
+            raise ValueError(
+                f"Invalid beta parameter: {betas[1]} - should be in [0.0, 1.0)"
+            )
         if not 0.0 <= eps:
             raise ValueError(f"Invalid epsilon value: {eps} - should be >= 0.0")
-        defaults = {"lr": lr, "betas": betas, "eps": eps, "weight_decay": weight_decay, "correct_bias": correct_bias}
+        defaults = {
+            "lr": lr,
+            "betas": betas,
+            "eps": eps,
+            "weight_decay": weight_decay,
+            "correct_bias": correct_bias,
+        }
         super().__init__(params, defaults)
 
     @torch.no_grad()
@@ -212,7 +244,9 @@ class AdamW(optim.Optimizer):
                     continue
                 grad = p.grad
                 if grad.is_sparse:
-                    raise RuntimeError("Adam does not support sparse gradients, please consider SparseAdam instead")
+                    raise RuntimeError(
+                        "Adam does not support sparse gradients, please consider SparseAdam instead"
+                    )
 
                 state = self.state[p]
 
@@ -239,7 +273,9 @@ class AdamW(optim.Optimizer):
                 if group["correct_bias"]:  # No bias correction for Bert
                     bias_correction1 = 1.0 - beta1 ** state["step"]
                     bias_correction2 = 1.0 - beta2 ** state["step"]
-                    step_size = step_size * math.sqrt(bias_correction2) / bias_correction1
+                    step_size = (
+                        step_size * math.sqrt(bias_correction2) / bias_correction1
+                    )
 
                 p.addcdiv_(exp_avg, denom, value=-step_size)
 
@@ -255,6 +291,7 @@ class AdamW(optim.Optimizer):
                     p.add_(p, alpha=(-group["lr"] * group["weight_decay"]))
         return loss
 
+
 class SGD(optim.Optimizer):
     def __init__(self, params, lr=0.01):
         if lr < 0.0:
@@ -267,12 +304,13 @@ class SGD(optim.Optimizer):
         if closure is not None:
             loss = closure()
         for group in self.param_groups:
-            for p in group['params']:
+            for p in group["params"]:
                 if p.grad is None:
                     continue
-                p.data -= group['lr'] * p.grad.data
+                p.data -= group["lr"] * p.grad.data
         return loss
-    
+
+
 class StoIHT(optim.Optimizer):
     def __init__(self, params, k, approx, proj, prob, lr=0.01):
         if lr < 0.0:
@@ -285,83 +323,48 @@ class StoIHT(optim.Optimizer):
         if closure is not None:
             loss = closure()
         for group in self.param_groups:
-            for p in group['params']:
+            for p in group["params"]:
                 if p.grad is None:
                     continue
                 d_p = p.grad.data
-                b_t = p.data - group['lr'] * d_p
-                if np.random.random() < group['prob']:
-                    Gamma_t = group['approx'](b_t, group['k'])
-                    p.data = group['proj'](b_t, Gamma_t)
+                b_t = p.data - group["lr"] * d_p
+                if np.random.random() < group["prob"]:
+                    Gamma_t = group["approx"](b_t, group["k"])
+                    p.data = group["proj"](b_t, Gamma_t)
                 else:
                     p.data = b_t
         return loss
+
 
 def approx_0(x, k):
     if len(x.shape) == 1:
         idxs = torch.sort(x, descending=True).indices[:k]
         mask = torch.zeros_like(x, dtype=x.dtype)
-        mask[idxs] = 1.
+        mask[idxs] = 1.0
         return mask
     elif len(x.shape) == 2:
         x_long = x.reshape(-1)
         idxs = torch.sort(x_long, descending=True).indices[:k]
         mask = torch.zeros_like(x_long, dtype=x.dtype)
-        mask[idxs] = 1.
+        mask[idxs] = 1.0
         return mask.reshape(x.shape)
     else:
         raise NotImplementedError("Only x.shape() 1 and 2 available!")
-      
+
+
 def proj_0_old(x, mask):
     return x.mul(mask)
 
+
 def proj_0(x: torch.Tensor, K: int):
     _, idx = torch.topk(x, k=x.shape[0] - K, largest=False)
-    x[idx] = 0.
+    x[idx] = 0.0
     return x
 
-def proj_simplex(x: torch.Tensor, temp: int): # NEW
+def proj_simplex(x: torch.Tensor, temp: int):
     x_0 = (x - x.max()) / temp
     return torch.exp(x_0) / torch.exp(x_0).sum()
 
-def upgrade_lora_AB(param_A, param_B, r_new):
-    Q, R = torch.linalg.qr(param_A.data, mode="reduced")
-    N = torch.rand(
-        (param_A.data.shape[0], r_new - param_A.data.shape[1]),
-        requires_grad=True,
-        device=param_A.data.device
-    )
-    I = torch.eye(
-        np.max(param_A.data.shape),
-        requires_grad=True,
-        device=param_A.data.device
-    )
-    O = torch.zeros(
-        (r_new - param_B.data.shape[0], param_B.data.shape[1]),
-        requires_grad=True,
-        device=param_B.data.device
-    )
-
-    param_A.data = torch.concat([Q, (I - Q@Q.T)@N], dim=1)
-    param_B.data = torch.concat([R @ param_B.data, O], dim=0)
-
-def downgrade_lora_AB(param_A, param_B, r_new):
-    Q_A, R_A = torch.linalg.qr(param_A.data, mode="reduced")
-    Q_B, R_B = torch.linalg.qr(param_B.data.T, mode="reduced")
-    U, S, V = torch.linalg.svd(R_A @ R_B.T)
-
-    dim_S = max(U.shape[1], V.shape[0])
-    if len(S) < dim_S:
-        S = torch.diag(torch.concat((S, torch.zeros(dim_S-len(S), device=S.device))))[:U.shape[1], :V.shape[0]]
-    else:
-        S = torch.diag(S)
-
-    U_r = U[:, :r_new]
-    S_r = S[:r_new, :r_new]
-    V_r = V[:r_new, :]
-
-    param_A.data = Q_A @ U_r
-    param_B.data = S_r @ V_r @ Q_B.T
 
 class FatAdamW(optim.Optimizer):
     """
@@ -423,7 +426,7 @@ class FatAdamW(optim.Optimizer):
 
         self.lora_layers = lora_layers
 
-        self.temp = 1 # WARNING !!!
+        self.temp = 1
         self.num_adapters = num_adapters
         self.chosen_layers = list(range(num_adapters))
         self.lora_ranks = [default_lora_rank] * num_adapters
@@ -535,7 +538,7 @@ class FatAdamW(optim.Optimizer):
 
                 state["step"] += 1
 
-                if group["name"] == "loraAB_params" and state["step"] % self.fat_step == 0 and self.max_fat_steps > 0:
+                if group["name"] == "loraAB" and state["step"] % self.fat_step == 0 and self.max_fat_steps > 0:
                     lora_rank_update = True
                     continue
 
@@ -554,6 +557,13 @@ class FatAdamW(optim.Optimizer):
                     p.add_(p, alpha=(-group["lr"] * group["weight_decay"]))
 
         ############################ Rank update for lor a layers #############################
+
+        for i, layer in enumerate(self.lora_layers):
+            adapter_name = layer._active_adapter[0]
+            print("A:", layer.lora_A[adapter_name].weight)
+            print("B:", layer.lora_B[adapter_name].weight)
+            break
+
         if not lora_rank_update:
             return loss
         
@@ -570,16 +580,16 @@ class FatAdamW(optim.Optimizer):
             else:
                 layer.update_lora_rank_QR(self.lora_ranks[i], adapter_name)
             
-            w_A = layer.weight_lora_A[adapter_name]
-            w_B = layer.weight_lora_B[adapter_name]
+            lora_A = layer.lora_A[adapter_name].weight
+            lora_B = layer.lora_B[adapter_name].weight
             
-            self.state[w_A]["step"] = 0
-            self.state[w_A]["exp_avg"] = torch.zeros_like(w_A)
-            self.state[w_A]["exp_avg_sq"] = torch.zeros_like(w_A) 
+            self.state[lora_A]["step"] = 0
+            self.state[lora_A]["exp_avg"] = torch.zeros_like(lora_A)
+            self.state[lora_A]["exp_avg_sq"] = torch.zeros_like(lora_A) 
 
-            self.state[w_B]["step"] = 0
-            self.state[w_B]["exp_avg"] = torch.zeros_like(w_B)
-            self.state[w_B]["exp_avg_sq"] = torch.zeros_like(w_B) 
+            self.state[lora_B]["step"] = 0
+            self.state[lora_B]["exp_avg"] = torch.zeros_like(lora_B)
+            self.state[lora_B]["exp_avg_sq"] = torch.zeros_like(lora_B) 
 
         return loss
     
@@ -611,7 +621,6 @@ class WeightAdamW(optim.Optimizer):
         betas: tuple[float, float] = (0.9, 0.999),
         eps: float = 1e-6,
         weight_decay: float = 0.0,
-        fat_step: int = 1,
         correct_bias: bool = True,
         no_deprecation_warning: bool = True,
     ):
@@ -626,14 +635,23 @@ class WeightAdamW(optim.Optimizer):
         if lr < 0.0:
             raise ValueError(f"Invalid learning rate: {lr} - should be >= 0.0")
         if not 0.0 <= betas[0] < 1.0:
-            raise ValueError(f"Invalid beta parameter: {betas[0]} - should be in [0.0, 1.0)")
+            raise ValueError(
+                f"Invalid beta parameter: {betas[0]} - should be in [0.0, 1.0)"
+            )
         if not 0.0 <= betas[1] < 1.0:
-            raise ValueError(f"Invalid beta parameter: {betas[1]} - should be in [0.0, 1.0)")
+            raise ValueError(
+                f"Invalid beta parameter: {betas[1]} - should be in [0.0, 1.0)"
+            )
         if not 0.0 <= eps:
             raise ValueError(f"Invalid epsilon value: {eps} - should be >= 0.0")
-        defaults = {"lr": lr, "betas": betas, "eps": eps, "weight_decay": weight_decay, "correct_bias": correct_bias}
+        defaults = {
+            "lr": lr,
+            "betas": betas,
+            "eps": eps,
+            "weight_decay": weight_decay,
+            "correct_bias": correct_bias,
+        }
         super().__init__(params, defaults)
-        self.fat_step = fat_step
 
     @torch.no_grad()
     def step(self, closure: Callable = None):
@@ -649,13 +667,15 @@ class WeightAdamW(optim.Optimizer):
 
         for group in self.param_groups:
             if group["name"] != "weight_params":
-            ############################ Adam Step #############################
+                ############################ Adam Step #############################
                 for p in group["params"]:
                     if p.grad is None:
                         continue
                     grad = p.grad
                     if grad.is_sparse:
-                        raise RuntimeError("Adam does not support sparse gradients, please consider SparseAdam instead")
+                        raise RuntimeError(
+                            "Adam does not support sparse gradients, please consider SparseAdam instead"
+                        )
 
                     state = self.state[p]
                     # State initialization
@@ -664,7 +684,7 @@ class WeightAdamW(optim.Optimizer):
                         # Exponential moving average of gradient values
                         state["exp_avg"] = torch.zeros_like(p)
                         # Exponential moving average of squared gradient values
-                        state["exp_avg_sq"] = torch.zeros_like(p)       
+                        state["exp_avg_sq"] = torch.zeros_like(p)
 
                     exp_avg, exp_avg_sq = state["exp_avg"], state["exp_avg_sq"]
                     beta1, beta2 = group["betas"]
@@ -679,15 +699,18 @@ class WeightAdamW(optim.Optimizer):
                     if group["correct_bias"]:  # No bias correction for Bert
                         bias_correction1 = 1.0 - beta1 ** state["step"]
                         bias_correction2 = 1.0 - beta2 ** state["step"]
-                        step_size = step_size * math.sqrt(bias_correction2) / bias_correction1
+                        step_size = (
+                            step_size * math.sqrt(bias_correction2) / bias_correction1
+                        )
 
                     p.addcdiv_(exp_avg, denom, value=-step_size)
                     if group["weight_decay"] > 0.0:
                         p.add_(p, alpha=(-group["lr"] * group["weight_decay"]))
             else:
-            ######################## StoIHT step for w #########################
+                ######################## StoIHT step for w #########################
                 w_vector = []
                 w_grad = []
+                do_proj = False
                 for p in group["params"]:
                     if p.grad is None:
                         continue
@@ -695,22 +718,27 @@ class WeightAdamW(optim.Optimizer):
                     if len(state) == 0:
                         state["step"] = 0
                     state["step"] += 1
-                    p.add_(p.grad, alpha=-group['lr'])
-                    w_grad.append(p.grad.item())
-                    w_vector.append(p.data.item())
-                j = 0
-                w_grad = torch.tensor(w_grad)
-                if state["step"] % self.fat_step == 0 and torch.linalg.norm(w_grad).item() > 1e-10:
-                    w_vector = torch.tensor(w_vector)
-                    w_vector = group["proj"](w_vector, group["k"])
-                    for p in group["params"]:
-                        if p.grad is None:
-                            continue
-                        p.data = torch.tensor([w_vector[j]], device=p.device)
-                        j += 1
+                    if state["step"] < group["max_fat_steps"]:
+                        p.add_(p.grad, alpha=-group["lr"])
+                        w_grad.append(p.grad.item())
+                        w_vector.append(p.data.item())
+                        do_proj = True
+                
+                if do_proj:
+                    j = 0
+                    w_grad = torch.tensor(w_grad)
+                    if torch.linalg.norm(w_grad).item() > 1e-10:
+                        w_vector = torch.tensor(w_vector)
+                        w_vector = group["proj"](w_vector, group["k"])
+                        for p in group["params"]:
+                            if p.grad is None:
+                                continue
+                            p.data = torch.tensor([w_vector[j]], device=p.device)
+                            j += 1
             ####################################################################
         return loss
-    
+
+
 class WeightAdamW_old(optim.Optimizer):
     """
     Implements Adam algorithm with weight decay for Weight Lora adapter
@@ -743,8 +771,8 @@ class WeightAdamW_old(optim.Optimizer):
         no_deprecation_warning: bool = True,
         calculate_w_step: int = 1,
         k: int = 100,
-        approx = approx_0,
-        proj = proj_0_old,
+        approx=approx_0,
+        proj=proj_0_old,
     ):
         if not no_deprecation_warning:
             warnings.warn(
@@ -757,12 +785,22 @@ class WeightAdamW_old(optim.Optimizer):
         if lr < 0.0:
             raise ValueError(f"Invalid learning rate: {lr} - should be >= 0.0")
         if not 0.0 <= betas[0] < 1.0:
-            raise ValueError(f"Invalid beta parameter: {betas[0]} - should be in [0.0, 1.0)")
+            raise ValueError(
+                f"Invalid beta parameter: {betas[0]} - should be in [0.0, 1.0)"
+            )
         if not 0.0 <= betas[1] < 1.0:
-            raise ValueError(f"Invalid beta parameter: {betas[1]} - should be in [0.0, 1.0)")
+            raise ValueError(
+                f"Invalid beta parameter: {betas[1]} - should be in [0.0, 1.0)"
+            )
         if not 0.0 <= eps:
             raise ValueError(f"Invalid epsilon value: {eps} - should be >= 0.0")
-        defaults = {"lr": lr, "betas": betas, "eps": eps, "weight_decay": weight_decay, "correct_bias": correct_bias}
+        defaults = {
+            "lr": lr,
+            "betas": betas,
+            "eps": eps,
+            "weight_decay": weight_decay,
+            "correct_bias": correct_bias,
+        }
         self.k = k
         self.approx = approx
         self.proj = proj
@@ -798,7 +836,9 @@ class WeightAdamW_old(optim.Optimizer):
                 if grad.norm() > 0:
                     sum += 1
                 if grad.is_sparse:
-                    raise RuntimeError("Adam does not support sparse gradients, please consider SparseAdam instead")
+                    raise RuntimeError(
+                        "Adam does not support sparse gradients, please consider SparseAdam instead"
+                    )
 
                 state = self.state[p]
                 # State initialization
@@ -807,7 +847,7 @@ class WeightAdamW_old(optim.Optimizer):
                     # Exponential moving average of gradient values
                     state["exp_avg"] = torch.zeros_like(p)
                     # Exponential moving average of squared gradient values
-                    state["exp_avg_sq"] = torch.zeros_like(p)       
+                    state["exp_avg_sq"] = torch.zeros_like(p)
 
                 exp_avg, exp_avg_sq = state["exp_avg"], state["exp_avg_sq"]
                 beta1, beta2 = group["betas"]
@@ -822,19 +862,21 @@ class WeightAdamW_old(optim.Optimizer):
                 if group["correct_bias"]:  # No bias correction for Bert
                     bias_correction1 = 1.0 - beta1 ** state["step"]
                     bias_correction2 = 1.0 - beta2 ** state["step"]
-                    step_size = step_size * math.sqrt(bias_correction2) / bias_correction1
+                    step_size = (
+                        step_size * math.sqrt(bias_correction2) / bias_correction1
+                    )
 
                 p.addcdiv_(exp_avg, denom, value=-step_size)
                 if group["weight_decay"] > 0.0:
                     p.add_(p, alpha=(-group["lr"] * group["weight_decay"]))
-            
+
             # print(f"There are {sum} non-null gradients")
             ######################## StoIHT step for w #########################
             # w_i = w_i / (w_i + eps)
             w_data = torch.tensor(w_data)
             w_grad = torch.tensor(w_grad)
             if w_grad.norm() > 0:
-                b_t = w_data - group['lr'] * w_grad
+                b_t = w_data - group["lr"] * w_grad
                 # b_t = w_data - w_grad
                 Gamma_t = self.approx(b_t, self.k)
                 w_data = self.proj(b_t, Gamma_t)
@@ -845,20 +887,25 @@ class WeightAdamW_old(optim.Optimizer):
                     if p.data.shape == torch.Size([1]):
                         p.data = torch.tensor([w_data[i]], device=p.device)
                         i += 1
-                        #print(f"i={i}, p.data={p.data}")
+                        # print(f"i={i}, p.data={p.data}")
                         # print(f"After w step: w: {p.data.item()}")
                 # print("$"*60)
             ####################################################################
         return loss
 
+
 from math import ceil
+
+
 class Rand:
-    def __init__(self, compressor_params: dict={"compression_rate": 0.1}) -> None:
+    def __init__(self, compressor_params: dict = {"compression_rate": 0.1}) -> None:
         self.compression_rate = compressor_params["compression_rate"]
         self.used_coordinates = []
         self.K = 0
+
     def get_probs(self, x: torch.Tensor):
         return torch.ones_like(x)
+
     def compress(self, x: torch.Tensor):
         d = x.shape[0]
         m = ceil(self.compression_rate * d)
@@ -867,32 +914,43 @@ class Rand:
         idxs = torch.multinomial(probs, m)
         x_flatten[~idxs] = 0
         self.used_coordinates = idxs.tolist() + self.used_coordinates
-        self.used_coordinates = self.used_coordinates[:self.K * m]
-        return 1./ self.compression_rate * x_flatten.reshape(x.shape)
+        self.used_coordinates = self.used_coordinates[: self.K * m]
+        return 1.0 / self.compression_rate * x_flatten.reshape(x.shape)
+
 
 class Banlast(Rand):
-    def __init__(self, compressor_params: dict={"compression_rate": 0.1,
-                                                "K" : 7}):
+    def __init__(self, compressor_params: dict = {"compression_rate": 0.1, "K": 7}):
         super().__init__(compressor_params)
         self.K = compressor_params["K"]
+
     def get_probs(self, x: torch.Tensor):
         probs = torch.ones_like(x)
-        probs[self.used_coordinates] = 0.
+        probs[self.used_coordinates] = 0.0
         if probs.sum().item() == 0:
             probs = torch.ones_like(x)
         return probs
 
+
 class KAWASAKI(Rand):
-    def __init__(self, compressor_params: dict={"compression_rate": 0.1,
-                                                "K" : 7, "b" : 2., "proj" : None}):
+    def __init__(
+        self,
+        compressor_params: dict = {
+            "compression_rate": 0.1,
+            "K": 7,
+            "b": 2.0,
+            "proj": None,
+        },
+    ):
         super().__init__(compressor_params)
         self.K = compressor_params["K"]
         self.b = compressor_params["b"]
         self.proj = compressor_params["proj"]
+
     def get_probs(self, x: torch.Tensor):
         probs = torch.ones_like(x)
-        num_used_coordinates = torch.Tensor([self.used_coordinates.count(i)
-                                             for i in range(x.shape[0])]).to(x.device)
+        num_used_coordinates = torch.Tensor(
+            [self.used_coordinates.count(i) for i in range(x.shape[0])]
+        ).to(x.device)
         probs /= self.b**num_used_coordinates
         if self.proj is not None:
             probs = self.proj(probs)
@@ -900,8 +958,9 @@ class KAWASAKI(Rand):
 
 
 class QSGD(optim.Optimizer):
-    def __init__(self, params, lr=0.01, compression_name: str = None,
-                 compressor_params=None):
+    def __init__(
+        self, params, lr=0.01, compression_name: str = None, compressor_params=None
+    ):
         if lr < 0.0:
             raise ValueError("Invalid learning rate: {}".format(lr))
         defaults = dict(lr=lr)
@@ -910,13 +969,13 @@ class QSGD(optim.Optimizer):
             raise ValueError(f"Wrong compression name {compression_name}")
         self.compression_name = compression_name
         self.compressor_params = compressor_params
-            
+
     def step(self, closure: Callable = None):
         loss = None
         if closure is not None:
             loss = closure()
         for group in self.param_groups:
-            for p in group['params']:
+            for p in group["params"]:
                 if p.grad is None:
                     continue
                 state = self.state[p]
@@ -931,7 +990,7 @@ class QSGD(optim.Optimizer):
                         state["compressor"] = None
                 if state["compressor"] is not None:
                     grad = state["compressor"].compress(p.grad.data)
-                    p.data -= group['lr'] * grad
+                    p.data -= group["lr"] * grad
                 else:
-                    p.data -= group['lr'] * p.grad.data
+                    p.data -= group["lr"] * p.grad.data
         return loss

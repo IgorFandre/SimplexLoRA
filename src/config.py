@@ -446,3 +446,11 @@ class TrainingArguments(Seq2SeqTrainingArguments):
         default=None,
         metadata={"help": "How to extednd adapters in FatLoRA. Can be smart ot dummy"}
     )
+    optimizer_type: Optional[str] = field(
+        default="AdamW",
+        metadata={"help": "Type of optimizer to use. Options: AdamW, GradientDiffSGD"}
+    )
+    max_batches_accumulating: Optional[int] = field(
+        default=10,
+        metadata={"help": "Maximum number of batches to use for full gradient computation in GradientDiffSGD"}
+    )

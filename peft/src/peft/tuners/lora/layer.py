@@ -57,6 +57,8 @@ class LoraLayer(BaseTunerLayer):
         self._caches: dict[str, Any] = {}
         self.ephemeral_gpu_offload: bool = ephemeral_gpu_offload
         self.kwargs = kwargs
+        self.use_weight_lora: dict[str, bool] = {} # for WeightLoRA
+        self.lora_weight = torch.nn.ParameterDict({}) # for WeightLoRA
 
         base_layer = self.get_base_layer()
         if isinstance(base_layer, nn.Linear):
@@ -101,7 +103,8 @@ class LoraLayer(BaseTunerLayer):
         self.out_features = out_features
 
     def update_layer(
-        self, adapter_name, r, lora_alpha, lora_dropout, init_lora_weights, use_rslora, use_dora: bool = False
+        self, adapter_name, r, lora_alpha, lora_dropout, init_lora_weights, 
+        use_rslora, use_dora: bool = False, use_weight_lora: bool = False
     ):
         # This code works for linear layers, override for other layer types
         if r <= 0:
@@ -143,6 +146,14 @@ class LoraLayer(BaseTunerLayer):
             self.use_dora[adapter_name] = True
         else:
             self.use_dora[adapter_name] = False
+
+        if use_weight_lora:
+            self.lora_weight[adapter_name] = torch.nn.Parameter(torch.empty(1))
+            nn.init.ones_(self.lora_weight[adapter_name])
+            self.adapter_layer_names = self.adapter_layer_names[:] + ("lora_weight",)
+            self.use_weight_lora[adapter_name] = True
+        else:
+            self.use_weight_lora[adapter_name] = False
 
         self.set_adapter(self.active_adapters)
 
@@ -382,6 +393,102 @@ class LoraLayer(BaseTunerLayer):
 
         return result
 
+    def update_lora_rank_QR(self, new_rank, adapter_name):
+        # lora_A: r x m, lora_B: n x r, W (base): n x m        
+        # A: m x r, B: r x n, W (base): n x m        
+        lora_A = self.lora_A[adapter_name].weight.T
+        lora_B = self.lora_B[adapter_name].weight.T
+        device = lora_A.device
+
+        current_rank = self.r[adapter_name]
+        n, m = self.get_base_layer().weight.shape
+
+        if new_rank == 0:
+            # why not?
+            self.get_base_layer().weight += self.get_delta_weight(adapter_name)
+
+            # TODO check for bugs
+            # TODO disable_adapters 
+            # self.disable_adapters = True
+            lora_A.data = torch.zeros((0, m), requires_grad=False, device=device)
+            lora_B.data = torch.zeros((n, 0), requires_grad=False, device=device)
+            
+        elif new_rank > current_rank:
+            Q, R = torch.linalg.qr(lora_A, mode="reduced")
+            N = torch.randn((m, new_rank - current_rank), device=device)
+            I = torch.eye(m, device=device)
+            O = torch.zeros((new_rank - current_rank, n), device=device)
+
+            lora_A.data = torch.concat([Q, (I - Q @ Q.T) @ N], dim=1).T
+            lora_B.data = torch.concat([R @ lora_B, O], dim=0).T
+
+            lora_A.requires_grad = True
+            lora_B.requires_grad = True
+
+        elif new_rank < current_rank:
+            # TODO debug
+            Q_A, R_A = torch.linalg.qr(lora_A, mode="reduced")
+            Q_B, R_B = torch.linalg.qr(lora_B.T, mode="reduced")
+            U, S, V = torch.linalg.svd(R_A @ R_B.T)
+            print("Q_A, Q_B, R_A, R_B: ", Q_A.shape, Q_B.shape, R_A.shape, R_B.shape)
+            print("before: ", U.shape, S.shape, V.shape, new_rank)
+
+            dim_S = new_rank
+            if len(S) < dim_S:
+                S = torch.diag(
+                    torch.concat((S, torch.zeros(dim_S - len(S), device=device)))
+                )[:dim_S, :dim_S]
+            else:
+                S = torch.diag(S)
+
+            U_r = U[:, :new_rank]
+            S_r = S[:new_rank, :new_rank]
+            V_r = V[:new_rank, :]
+
+            print("after: ", U.shape, S.shape, V.shape)
+
+            lora_A.data = Q_A @ U_r
+            lora_B.data = S_r @ V_r @ Q_B.T
+
+            lora_A.data = lora_A.data.T
+            lora_B.data = lora_B.data.T
+
+            lora_A.requires_grad = True
+            lora_B.requires_grad = True
+
+        self.r[adapter_name] = new_rank
+
+        if new_rank == 0:
+            self.scaling[adapter_name] = 0
+        else:
+            self.scaling[adapter_name] = self.lora_alpha[adapter_name] / new_rank
+                        
+
+    def final_lora_rank_update(self, new_rank, adapter_name):
+        # A: m x r, B: r x n, W (base): n x m
+        device = self.lora_A[adapter_name].weight.device
+
+        n, m = self.get_base_layer().weight.shape
+
+        # TODO multiply dropout
+        self.get_base_layer().weight += self.get_delta_weight(adapter_name)
+
+        # TODO rank 0 case
+        self.lora_A[adapter_name].weight.data = torch.randn((new_rank, m), requires_grad=True, device=device)
+        self.lora_B[adapter_name].weight.data = torch.zeros((n, new_rank), requires_grad=True, device=device)
+        self.lora_weight[adapter_name].data = torch.tensor(1., requires_grad=False, device=device)
+
+        self.r[adapter_name] = new_rank
+
+        if new_rank == 0:
+            self.scaling[adapter_name] = 0
+        else:
+            self.scaling[adapter_name] = self.lora_alpha[adapter_name] / new_rank
+    
+    def update_alpha(self, multiplier, adapter_name):
+        self.lora_alpha[adapter_name] *= multiplier
+        self.scaling[adapter_name] = self.lora_alpha[adapter_name] / self.r[adapter_name]
+
 
 # Below code is based on https://github.com/microsoft/LoRA/blob/main/loralib/layers.py
 # and modified to work with PyTorch FSDP
@@ -407,6 +514,7 @@ class Linear(nn.Module, LoraLayer):
         init_lora_weights: Union[bool, str] = True,
         use_rslora: bool = False,
         use_dora: bool = False,
+        use_weight_lora: bool = False,
         **kwargs,
     ) -> None:
         super().__init__()
@@ -422,6 +530,7 @@ class Linear(nn.Module, LoraLayer):
             init_lora_weights=init_lora_weights,
             use_rslora=use_rslora,
             use_dora=use_dora,
+            use_weight_lora=use_weight_lora
         )
         self.is_target_conv_1d_layer = is_target_conv_1d_layer
 
@@ -544,6 +653,12 @@ class Linear(nn.Module, LoraLayer):
             weight_B = weight_B.float()
 
         output_tensor = transpose(weight_B @ weight_A, self.fan_in_fan_out) * self.scaling[adapter]
+        if self.use_weight_lora[adapter]:
+            weight_lora_w = self.lora_weight[adapter]
+            if cast_to_fp32:
+                weight_lora_w = weight_lora_w.float()
+            output_tensor *= weight_lora_w
+            self.lora_weight[adapter].data = weight_lora_w.to(dtype)
 
         if cast_to_fp32:
             output_tensor = output_tensor.to(dtype=dtype)
@@ -551,6 +666,7 @@ class Linear(nn.Module, LoraLayer):
             # cast back the weights
             self.lora_A[adapter].weight.data = weight_A.to(dtype)
             self.lora_B[adapter].weight.data = weight_B.to(dtype)
+                
 
         return output_tensor
 
@@ -579,7 +695,12 @@ class Linear(nn.Module, LoraLayer):
                 x = x.to(lora_A.weight.dtype)
 
                 if not self.use_dora[active_adapter]:
-                    result = result + lora_B(lora_A(dropout(x))) * scaling
+                    if self.use_weight_lora[active_adapter]:
+                        lora_w = self.lora_weight[active_adapter]
+                        # print(lora_A.weight.shape, lora_B.weight.shape, x.shape, self.get_base_layer().weight.shape)
+                        result = result + lora_w * lora_B(lora_A(dropout(x))) * scaling
+                    else:
+                        result = result + lora_B(lora_A(dropout(x))) * scaling
                 else:
                     x = dropout(x)
                     result = result + self.lora_magnitude_vector[active_adapter](

@@ -41,6 +41,7 @@ if is_bnb_available():
             init_lora_weights: bool = True,
             use_rslora: bool = False,
             use_dora: bool = False,
+            use_weight_lora: bool = False,
             **kwargs,
         ) -> None:
             super().__init__()
@@ -56,6 +57,7 @@ if is_bnb_available():
                 init_lora_weights=init_lora_weights,
                 use_rslora=use_rslora,
                 use_dora=use_dora,
+                use_weight_lora=use_weight_lora,
             )
 
         def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
@@ -157,13 +159,14 @@ if is_bnb_available():
                 state.reset_grads()
 
         def get_delta_weight(self, adapter):
-            return (
-                transpose(
+            output = transpose(
                     self.lora_B[adapter].weight @ self.lora_A[adapter].weight,
                     False,
-                )
-                * self.scaling[adapter]
-            )
+                ) * self.scaling[adapter]
+            if self.use_weight_lora[adapter]:
+                output = output * self.lora_weight[adapter]
+
+            return output
 
         def _mixed_batch_forward(
             self, x: torch.Tensor, *args: Any, adapter_names: list[str], **kwargs: Any
@@ -199,6 +202,8 @@ if is_bnb_available():
                 # layer output
                 sub_batch = x[sub_batch_indices_list[i]]
                 output = lora_B(lora_A(dropout(sub_batch))) * scaling
+                if self.use_weight_lora[active_adapter]:
+                    output = output * self.lora_weight[active_adapter]
                 if requires_conversion:
                     output = output.to(expected_dtype)
                 result[sub_batch_indices_list[i]] += output
@@ -236,6 +241,8 @@ if is_bnb_available():
 
                     if not self.use_dora[active_adapter]:
                         output = lora_B(lora_A(dropout(x))) * scaling
+                        if self.use_weight_lora[active_adapter]:
+                            output = output * self.lora_weight[active_adapter]
                     else:
                         x = dropout(x)
                         output = self.lora_magnitude_vector[active_adapter](
@@ -294,6 +301,7 @@ if is_bnb_4bit_available():
             init_lora_weights: bool = True,
             use_rslora: bool = False,
             use_dora: bool = False,
+            use_weight_lora: bool = False,
             **kwargs,
         ) -> None:
             super().__init__()
@@ -309,6 +317,7 @@ if is_bnb_4bit_available():
                 init_lora_weights=init_lora_weights,
                 use_rslora=use_rslora,
                 use_dora=use_dora,
+                use_weight_lora=use_weight_lora,
             )
 
         def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
@@ -405,13 +414,14 @@ if is_bnb_4bit_available():
                 self.get_base_layer().weight = bnb.nn.Params4bit(w_data.to("cpu"), **kwargs).to(weight.device)
 
         def get_delta_weight(self, adapter):
-            return (
-                transpose(
+            output = transpose(
                     self.lora_B[adapter].weight @ self.lora_A[adapter].weight,
                     False,
-                )
-                * self.scaling[adapter]
-            )
+                ) * self.scaling[adapter]
+            if self.use_weight_lora[adapter]:
+                output = output * self.lora_weight[adapter]
+
+            return output_tensor
 
         def _mixed_batch_forward(
             self, x: torch.Tensor, *args: Any, adapter_names: list[str], **kwargs: Any
@@ -445,6 +455,8 @@ if is_bnb_4bit_available():
                 # layer output
                 sub_batch = x[sub_batch_indices_list[i]]
                 output = lora_B(lora_A(dropout(sub_batch))) * scaling
+                if self.use_weight_lora[active_adapter]:
+                    output = output * self.lora_weight[active_adapter]
                 if requires_conversion:
                     output = output.to(expected_dtype)
                 result[sub_batch_indices_list[i]] += output
@@ -487,6 +499,8 @@ if is_bnb_4bit_available():
 
                     if not self.use_dora[active_adapter]:
                         output = lora_B(lora_A(dropout(x))) * scaling
+                        if self.use_weight_lora[active_adapter]:
+                            output = output * self.lora_weight[active_adapter]
                     else:
                         x = dropout(x)
                         output = self.lora_magnitude_vector[active_adapter](

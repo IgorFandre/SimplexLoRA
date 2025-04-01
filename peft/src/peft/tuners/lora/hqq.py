@@ -41,6 +41,7 @@ if is_hqq_available():
             init_lora_weights: bool = True,
             use_rslora: bool = False,
             use_dora: bool = False,
+            use_weight_lora: bool = False,
             **kwargs,
         ) -> None:
             super().__init__()
@@ -56,6 +57,7 @@ if is_hqq_available():
                 init_lora_weights=init_lora_weights,
                 use_rslora=use_rslora,
                 use_dora=use_dora,
+                use_weight_lora=use_weight_lora,
             )
 
         def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:

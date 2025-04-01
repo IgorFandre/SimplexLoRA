@@ -42,7 +42,7 @@ def set_device(device_no: int):
     return device
 
 def count_atapters(model, peft_type):
-    if peft_type in ["LoRA", "ADALoRA", "DoRA", "rsLoRA"]:
+    if peft_type in ["LoRA", "ADALoRA", "DoRA", "rsLoRA", "WeightLoRA"]:
         adapter_name = "lora_A"
     elif peft_type == "LoKR":
         adapter_name = "lokr_w1"
@@ -81,7 +81,8 @@ def get_peft_arguments(training_args):
         peft_args = peft.LoraConfig(
             r                   = training_args.lora_r,
             lora_alpha          = training_args.lora_alpha,
-            lora_dropout        = training_args.lora_dropout
+            lora_dropout        = training_args.lora_dropout,
+            bias                = "none",
         )
     elif training_args.ft_strategy == "LoKR":
         peft_args = peft.LoKrConfig(
@@ -119,10 +120,11 @@ def get_peft_arguments(training_args):
             use_rslora          = True,
         )
     elif training_args.ft_strategy == "WeightLoRA":
-        peft_args = peft.WeightLoraConfig(
+        peft_args = peft.LoraConfig(
             r                   = training_args.lora_r,
             lora_alpha          = training_args.lora_alpha,
             lora_dropout        = training_args.lora_dropout,
+            use_weight_lora     = True,
         )
     elif training_args.ft_strategy == "Full":
         return None
@@ -138,6 +140,10 @@ def get_peft_arguments(training_args):
         #                             "gate_proj", "up_proj", "down_proj", 
         #                             "fc1", "fc2"]
         peft_args.target_modules = "all-linear"
+    elif training_args.model_name in ["meta-llama/Llama-2-7b-hf", "meta-llama/Meta-Llama-3.1-8B"]:
+        peft_args.target_modules = ["q_proj", "k_proj", "v_proj", "o_proj", 
+                                    "gate_proj", "up_proj", "down_proj", 
+                                    "lm_head"]
     else:
         raise ValueError(f"Pass target_modules to your model {training_args.model_name}")
     return peft_args

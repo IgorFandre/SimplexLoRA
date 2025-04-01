@@ -47,6 +47,7 @@ def main():
     #         param.requires_grad = False
 
     num_peft_adapters = utils.count_atapters(model, training_args.ft_strategy)
+    print(num_peft_adapters)
     if training_args.ft_strategy == "WeightLoRA":
         if training_args.use_rand: 
             training_args.ft_strategy = "RandLoRA"
@@ -69,10 +70,11 @@ def main():
         weight_params = []
         loraAB_params = []
         lora_layers = []
+        other_params = []
         
         for name, module in model.named_modules():
             # TODO check base_layer name or smth else
-            if isinstance(module, peft.tuners.weight_lora.layer.WeightLoraLayer):
+            if isinstance(module, peft.tuners.lora.layer.LoraLayer):
                 lora_layers.append(module)
 
                 adapter_name = module._active_adapter[0]
@@ -82,15 +84,22 @@ def main():
             # TODO check issue with specific linear layers
             # if not param.requires_grad:
             #     continue
-            if "weight_lora_A" in name or "weight_lora_B" in name:
+            if "lora_A" in name or "lora_B" in name:
                 loraAB_params.append(param)
-            if "weight_lora_w" in name:
+            if "lora_weight" in name:
                 weight_params.append(param)
 
         optimizer = optimizers.FatAdamW(
-            [{"params" : loraAB_params,  "name" : "loraAB_params"},
-             {"params" : weight_params, "proj" : optimizers.proj_simplex,
-              "lr" : training_args.learning_rate_w, "name" : "weight_params"}],
+            [
+                {"params": loraAB_params, "name": "loraAB"},
+                {"params": other_params, "name": "other_params"},
+                {
+                    "params": weight_params,
+                    "proj": optimizers.proj_simplex,
+                    "lr": training_args.learning_rate_w,
+                    "name": "weight_params",
+                },
+            ],
 
             lora_layers=lora_layers,
 
@@ -173,7 +182,7 @@ def main():
         if training_args.ft_strategy in ["WeightLoRA", "RandLoRA", "FatLoRA"]:
             i = 0
             for name, param in model.named_parameters():
-                if "weight_lora_w" in name:
+                if "lora_weight" in name:
                     if param.sum().item() > 0 and param.requires_grad:
                         i += 1
                         if training_args.model_name == "microsoft/deberta-v3-base":
