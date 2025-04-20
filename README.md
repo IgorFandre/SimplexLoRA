@@ -43,4 +43,4 @@ To run our experiments, use run_glue_experiments.sh
 ./run_glue_experiments.sh
 ```
 
-To conduct your own experiments, check glue_experiment/scripts/
+To conduct your own experiments, check [glue_experiment/scripts/](./glue_experiment/scripts/)
