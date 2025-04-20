@@ -88,7 +88,7 @@ def main():
                 {"params": other_params, "name": "other_params"},
                 {
                     "params": weight_params,
-                    "proj": optimizers.proj_simplex,
+                    "proj": optimizers.proj_simplex_euclidean,
                     "lr": training_args.learning_rate_w,
                     "name": "weight_params",
                 },

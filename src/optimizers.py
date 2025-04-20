@@ -362,9 +362,40 @@ def proj_0(x: torch.Tensor, K: int):
     x[idx] = 0.0
     return x
 
-def proj_simplex(x: torch.Tensor, temp: int):
+def proj_simplex_softmax(x: torch.Tensor, temp=1.0):
     x_0 = (x - x.max()) / temp
     return torch.exp(x_0) / torch.exp(x_0).sum()
+
+def proj_simplex_weighted_softmax(x: torch.Tensor, temp=1.0):
+    x_0 = (x - x.max()) / temp
+    return (torch.exp(x_0) * x) / (torch.exp(x_0) * x).sum()
+
+def proj_simplex_euclidean(x: torch.Tensor, temp=None, tau=0.0001, max_iter=1000):
+    '''
+    Bisection for projection onto the simplex
+    FROM: http://www.mblondel.org/publications/mblondel-icpr2014.pdf
+    temp is not used!
+    '''
+    null = torch.Tensor([0]).to(x.device)
+    func = lambda k: torch.sum(torch.maximum(x - k, null)) - 1
+    lower = torch.min(x) - 1 / len(x)
+    upper = torch.max(x)
+
+    for _ in range(max_iter):
+        midpoint = (upper + lower) / 2.0
+        value = func(midpoint)
+
+        if abs(value) <= tau:
+            break
+
+        if value <= 0:
+            upper = midpoint
+        else:
+            lower = midpoint
+
+    ans = torch.maximum(x - midpoint, null)
+    return ans / torch.sum(ans)
+
 
 def draw_rank_chart(w_vector):
     plt.figure(figsize=(9, 7))
@@ -499,8 +530,6 @@ class FatAdamW(optim.Optimizer):
 
                 new_chosen_layers = []
                 new_lora_ranks = (w_vector * self.default_lora_rank).int()
-                # print(f'prev lora ranks: {self.lora_ranks}')
-                print(f"new lora ranks: {new_lora_ranks}")
 
                 j = 0
                 for i, p in enumerate(group["params"]):
