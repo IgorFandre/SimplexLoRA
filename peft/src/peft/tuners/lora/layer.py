@@ -436,8 +436,6 @@ class LoraLayer(BaseTunerLayer):
             Q_A, R_A = torch.linalg.qr(lora_A, mode="reduced")
             Q_B, R_B = torch.linalg.qr(lora_B.T, mode="reduced")
             U, S, V = torch.linalg.svd(R_A @ R_B.T)
-            print("Q_A, Q_B, R_A, R_B: ", Q_A.shape, Q_B.shape, R_A.shape, R_B.shape)
-            print("before: ", U.shape, S.shape, V.shape, new_rank)
 
             dim_S = new_rank
             if len(S) < dim_S:
@@ -450,8 +448,6 @@ class LoraLayer(BaseTunerLayer):
             U_r = U[:, :new_rank]
             S_r = S[:new_rank, :new_rank]
             V_r = V[:new_rank, :]
-
-            print("after: ", U.shape, S.shape, V.shape)
 
             lora_A.data = Q_A @ U_r
             lora_B.data = S_r @ V_r @ Q_B.T

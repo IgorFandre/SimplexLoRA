@@ -6,12 +6,12 @@ do
     do
         for seed in 18 52 1917
         do
-            CUDA_VISIBLE_DEVICES=7 python ./glue_experiment/run_glue.py \
+            CUDA_VISIBLE_DEVICES=6 python ./glue_experiment/run_glue.py \
                 --dataset_name glue \
                 --task_name $task_name \
                 --model_name_or_path microsoft/deberta-v3-base \
-                --per_device_train_batch_size 32 \
-                --per_device_eval_batch_size 32 \
+                --per_device_train_batch_size 16 \
+                --per_device_eval_batch_size 16 \
                 --gradient_accumulation_steps 6 \
                 --learning_rate tuned \
                 --lr_scheduler_type linear \

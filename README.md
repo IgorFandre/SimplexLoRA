@@ -27,3 +27,12 @@ pip install pip==24.1.1
 ```bash
 pip install -r requirements.txt
 ```
+
+## Run experiments
+To run our experiments, use run_glue_experiments.sh
+
+```
+./run_glue_experiments.sh
+```
+
+To conduct your own experiments, check glue_experiment/scripts/

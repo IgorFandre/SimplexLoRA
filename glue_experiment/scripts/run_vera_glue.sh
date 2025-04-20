@@ -1,9 +1,10 @@
-CUDA_VISIBLE_DEVICES=1 python run_experiment.py \
+clear
+CUDA_VISIBLE_DEVICES=6 python ./glue_experiment/run_glue.py \
     --dataset_name glue \
-    --task_name stsb \
+    --task_name mrpc \
     --model_name_or_path microsoft/deberta-v3-base \
-    --per_device_train_batch_size 32 \
-    --per_device_eval_batch_size 32 \
+    --per_device_train_batch_size 16 \
+    --per_device_eval_batch_size 16 \
     --gradient_accumulation_steps 6 \
     --learning_rate 8e-3 \
     --lr_scheduler_type linear \

@@ -5,6 +5,7 @@ from typing import Callable
 import numpy as np
 import torch
 import torch.optim as optim
+from matplotlib import pyplot as plt
 
 ############################### torch optimizers ###############################
 """
@@ -365,6 +366,16 @@ def proj_simplex(x: torch.Tensor, temp: int):
     x_0 = (x - x.max()) / temp
     return torch.exp(x_0) / torch.exp(x_0).sum()
 
+def draw_rank_chart(w_vector):
+    plt.figure(figsize=(9, 7))
+
+    plt.hist(w_vector, bins=10, edgecolor="black", alpha=0.7)
+    plt.title('Nonzero rank distribution')
+    plt.xlabel('rank')
+    plt.ylabel('count')
+
+    plt.savefig('rank_chart.png')
+
 
 class FatAdamW(optim.Optimizer):
     """
@@ -471,23 +482,25 @@ class FatAdamW(optim.Optimizer):
 
                 p.add_(p.grad, alpha=-group['lr'])
                 w_vector.append(p.data.item())
-            
-            w_vector = torch.tensor(w_vector)
-            print(f"before proj {w_vector}")
-            w_vector = group["proj"](w_vector, self.temp) * len(self.chosen_layers)
-            print(f"after proj {w_vector}")
-
-            j = 0
-            for i, p in enumerate(group["params"]):
-                if p.grad is None or i not in self.chosen_layers:
-                    continue
-
-                p.data = torch.tensor([w_vector[j]], device=p.device)
-                j += 1
 
             if group["w_step"] % self.fat_step == 0:
+                w_vector = torch.tensor(w_vector)
+                # print(f"before proj {w_vector}")
+                w_vector = group["proj"](w_vector, self.temp) * self.num_adapters
+                # print(f"after proj {w_vector}")
+
+                j = 0
+                for i, p in enumerate(group["params"]):
+                    if p.grad is None or i not in self.chosen_layers:
+                        continue
+
+                    p.data = torch.tensor([w_vector[j]], device=p.device)
+                    j += 1
+
                 new_chosen_layers = []
-                new_lora_ranks = (self.num_adapters * w_vector * self.default_lora_rank).int()
+                new_lora_ranks = (w_vector * self.default_lora_rank).int()
+                # print(f'prev lora ranks: {self.lora_ranks}')
+                print(f"new lora ranks: {new_lora_ranks}")
 
                 j = 0
                 for i, p in enumerate(group["params"]):
@@ -570,15 +583,19 @@ class FatAdamW(optim.Optimizer):
         
         self.max_fat_steps -= 1
 
+        j = 0
         for i, layer in enumerate(self.lora_layers):
+            if i not in self.chosen_layers:
+                continue
+
             # TODO check if type(layer._active_adapter) == 'str'
             # layer._active_adapter == ['default']
             adapter_name = layer._active_adapter[0]
 
             if self.max_fat_steps == 0:
-                layer._final_lora_rank_update(self.lora_ranks[i], adapter_name)
+                layer._final_lora_rank_update(self.lora_ranks[j], adapter_name)
             else:
-                layer._update_lora_rank_QR(self.lora_ranks[i], adapter_name)
+                layer._update_lora_rank_QR(self.lora_ranks[j], adapter_name)
             
             lora_A = layer.lora_A[adapter_name].weight
             lora_B = layer.lora_B[adapter_name].weight
@@ -590,6 +607,11 @@ class FatAdamW(optim.Optimizer):
             self.state[lora_B]["step"] = 0
             self.state[lora_B]["exp_avg"] = torch.zeros_like(lora_B)
             self.state[lora_B]["exp_avg_sq"] = torch.zeros_like(lora_B) 
+
+            j += 1
+
+        if self.max_fat_steps == 0:
+            draw_rank_chart(w_vector)
 
         return loss
     
