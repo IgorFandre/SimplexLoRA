@@ -1,10 +1,10 @@
 ## Requirements 
     python 3.11.7
 
-## Dependancies installation
-Plese follow these steps (required!):
+## Dependencies installation
+Please follow these steps (required!):
 
-0. If you don't have python of specific version:
+0. Python installation
     - Install conda
     - Run:
       ```bash
@@ -26,6 +26,14 @@ pip install pip==24.1.1
 3. Install rest of packages from requirements.txt
 ```bash
 pip install -r requirements.txt
+```
+
+#
+
+For the further runs use:
+```bash
+conda activate python3.11.7
+source venv/bin/activate
 ```
 
 ## Run experiments
