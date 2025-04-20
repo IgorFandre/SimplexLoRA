@@ -4,7 +4,7 @@
 ## Dependencies installation
 Please follow these steps (required!):
 
-0. Python installation
+0. Install python3.11.7
     - Install conda
     - Run:
       ```bash

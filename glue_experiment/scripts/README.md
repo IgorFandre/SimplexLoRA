@@ -1,9 +1,14 @@
 ## Description
 Here you can see scripts which run tuners with different parameters.
 
-Default run scenario:
+Default run scenario for SimplexLoRA:
 ```
 ./run_simplex_lora_glue.sh
+```
+
+Run scenario for any other adapter:
+```
+./run_adapter_name_glue.sh
 ```
 
 Obviously, but the name of the script matches the name of the tuner it uses.

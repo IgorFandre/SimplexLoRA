@@ -396,15 +396,30 @@ def proj_simplex_euclidean(x: torch.Tensor, temp=None, tau=0.0001, max_iter=1000
     ans = torch.maximum(x - midpoint, null)
     return ans / torch.sum(ans)
 
+def draw_rank_chart(history, r_0):
+    plt.style.use("ggplot")
+    plt.figure(figsize=(16, 9))
 
-def draw_rank_chart(w_vector):
-    plt.figure(figsize=(9, 7))
+    max_rank = 0
+    for ranks in history:
+        max_rank = max(max_rank, max(ranks))
 
-    plt.hist(w_vector, bins=10, edgecolor="black", alpha=0.7)
-    plt.title('Nonzero rank distribution')
+    for i, ranks in enumerate(history):
+        nonzero_ranks = list(filter(lambda rank: rank != 0, ranks))
+
+        plt.hist(
+            nonzero_ranks,
+            bins=np.linspace(0, max_rank + 1, 15),
+            edgecolor="black",
+            alpha=0.4,
+            label=f"{i + 1} iteration: {len(nonzero_ranks)} active LoRA"
+        )
+
+    plt.title(r"Nonzero rank distribution ($r_0 = {}$)".format(r_0))
     plt.xlabel('rank')
     plt.ylabel('count')
 
+    plt.legend()
     plt.savefig('rank_chart.png')
 
 
@@ -481,6 +496,8 @@ class FatAdamW(optim.Optimizer):
         self.fat_step = fat_step
         self.max_fat_steps = max_fat_steps
 
+        self.graph_history = []
+
     @torch.no_grad()
     def step(self, closure: Callable = None):
         """
@@ -545,6 +562,13 @@ class FatAdamW(optim.Optimizer):
                 self.lora_ranks = new_lora_ranks
 
                 print("New chosen layers:", self.chosen_layers)
+
+                ### Graph ###
+                current_history = np.zeros(self.num_adapters)
+                for i, layer_idx in enumerate(self.chosen_layers):
+                    current_history[layer_idx] = new_lora_ranks[i]
+
+                self.graph_history.append(current_history)
         ####################################################################
         
         lora_rank_update = False
@@ -640,7 +664,8 @@ class FatAdamW(optim.Optimizer):
             j += 1
 
         if self.max_fat_steps == 0:
-            draw_rank_chart(w_vector)
+            draw_rank_chart(self.graph_history, self.default_lora_rank)
+            print(self.graph_history)
 
         return loss
     
