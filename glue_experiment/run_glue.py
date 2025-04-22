@@ -135,9 +135,9 @@ def main():
     training_args.peft_params = training_args.all_params - all_params_before_peft
     training_args.train_proportion = training_args.trainable_params / training_args.all_params * 100 
     training_args.peft_proportion = training_args.peft_params / training_args.all_params * 100 
-    os.environ["WANDB_PROJECT"] = "FAT_LORA"
-    if training_args.ft_strategy in ["WeightLoRA", "RandLoRA"]:
-        run_name = f"[{training_args.ft_strategy} k={training_args.k} r={training_args.lora_r}]"
+    os.environ["WANDB_PROJECT"] = "SIMPLEX_LORA"
+    if training_args.ft_strategy in ["FatLoRA", ]:
+        run_name = f"[{training_args.ft_strategy}({training_args.fat_step}, {training_args.max_fat_steps}) r={training_args.lora_r}]"
     else:
         run_name = f"[{training_args.ft_strategy} r={training_args.lora_r}]"
     run_name += f" {data_args.task_name}, lr={training_args.learning_rate}"
