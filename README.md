@@ -14,11 +14,11 @@ Please follow these steps (required!):
 
 1. Create virtual env
 ```bash
-python3.11 -m venv venv
+python -m venv venv
 source venv/bin/activate
 ```
 
-2. Update pip to latest
+2. Update pip
 ```bash
 pip install pip==24.1.1
 ```
@@ -26,6 +26,11 @@ pip install pip==24.1.1
 3. Install rest of packages from requirements.txt
 ```bash
 pip install -r requirements.txt
+```
+
+4. Install local version of peft
+```bash
+pip install ./peft
 ```
 
 #
