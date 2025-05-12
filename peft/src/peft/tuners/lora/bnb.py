@@ -421,7 +421,7 @@ if is_bnb_4bit_available():
             if self.use_weight_lora[adapter]:
                 output = output * self.lora_weight[adapter]
 
-            return output_tensor
+            return output
 
         def _mixed_batch_forward(
             self, x: torch.Tensor, *args: Any, adapter_names: list[str], **kwargs: Any
