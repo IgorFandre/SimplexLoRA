@@ -6,7 +6,7 @@ do
     do
         for seed in 18 52 1917
         do
-            CUDA_VISIBLE_DEVICES=6 python ./glue_experiment/run_glue.py \
+            CUDA_VISIBLE_DEVICES=1 python ./glue_experiment/run_glue.py \
                 --dataset_name glue \
                 --task_name $task_name \
                 --model_name_or_path microsoft/deberta-v3-base \

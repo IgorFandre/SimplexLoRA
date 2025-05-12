@@ -398,6 +398,7 @@ class LoraLayer(BaseTunerLayer):
         # A: m x r, B: r x n, W (base): n x m        
         lora_A = self.lora_A[adapter_name].weight.T
         lora_B = self.lora_B[adapter_name].weight.T
+        print(f'_update_lora_rank_QR: , A.shape = {lora_A.shape}, B.shape = {lora_B.shape}')
         device = lora_A.device
 
         current_rank = self.r[adapter_name]

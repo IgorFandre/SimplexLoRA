@@ -1,6 +1,7 @@
 import numpy as np
 import logging
 from datasets import load_dataset, load_metric
+from peft import prepare_model_for_kbit_training
 from transformers import (
     PretrainedConfig,
     EvalPrediction,
@@ -9,7 +10,9 @@ from transformers import (
     AutoModelForSequenceClassification,
     AutoTokenizer,
     AutoConfig,
+    BitsAndBytesConfig
 )
+import torch
 
 logger = logging.getLogger(__name__)
 
@@ -63,14 +66,42 @@ def glue_preprocess(data_args, training_args, model_args):
         revision=model_args.model_revision,
         use_auth_token=True if model_args.use_auth_token else None,
     )
+
+    if model_args.model_name_or_path in ["meta-llama/Meta-Llama-3.1-8B"]:
+        if torch.cuda.get_device_capability()[0] >= 8:
+            attn_implementation = "flash_attention_2"
+            torch_dtype = torch.bfloat16
+        else:
+            attn_implementation = "eager"
+            torch_dtype = torch.float16
+        bnb_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_quant_type="nf4",
+            bnb_4bit_compute_dtype=torch_dtype,
+            bnb_4bit_use_double_quant=True,
+        )
+    else:
+        attn_implementation = "eager"
+        torch_dtype = torch.float32
+        bnb_config = None
     model = AutoModelForSequenceClassification.from_pretrained(
         model_args.model_name_or_path,
         from_tf=bool(".ckpt" in model_args.model_name_or_path),
         config=config,
+        quantization_config=bnb_config,
+        attn_implementation=attn_implementation,
         cache_dir=model_args.cache_dir,
         revision=model_args.model_revision,
         use_auth_token=True if model_args.use_auth_token else None,
     )
+    print(f'model is {model_args.model_name_or_path}, {bool(".ckpt" in model_args.model_name_or_path)}')
+
+    if model_args.model_name_or_path in ["meta-llama/Meta-Llama-3.1-8B"]:
+        model.gradient_checkpointing_enable()
+        model = prepare_model_for_kbit_training(model)
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+        model.config.pad_token_id = tokenizer.eos_token_id
     # Some models have set the order of the labels to use, so let's make sure we do use it.
     label_to_id = None
     if (
