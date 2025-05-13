@@ -444,6 +444,8 @@ class LoraLayer(BaseTunerLayer):
 
         current_rank = self.r[adapter_name]
         n, m = lora_B.shape[1], lora_A.shape[0]
+        
+        torch.backends.cuda.preferred_linalg_library('magma')
 
         if new_rank == 0:
             self._merge_delta_with_base(adapter_name)
@@ -479,6 +481,8 @@ class LoraLayer(BaseTunerLayer):
 
             lora_A.data = Q_A @ U_r
             lora_B.data = S_r @ V_r @ Q_B.T
+        
+        torch.backends.cuda.preferred_linalg_library('default')
 
         if revert_flg:
             lora_A = lora_A.T

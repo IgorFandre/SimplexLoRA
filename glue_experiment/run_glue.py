@@ -140,10 +140,16 @@ def main():
         run_name = f"[{training_args.ft_strategy} fs={training_args.fat_step}, mfs={training_args.max_fat_steps}, r={training_args.lora_r}]"
     else:
         run_name = f"[{training_args.ft_strategy} r={training_args.lora_r}]"
-    run_name += f" {data_args.task_name}, lr={training_args.learning_rate}"
+    if model_args.model_name_or_path == "meta-llama/Meta-Llama-3.1-8B":
+        run_model_name = "llama"
+    elif model_args.model_name_or_path == "microsoft/deberta-v3-base":
+        run_model_name = "deberta"
+    else:
+        run_model_name = model_args.model_name_or_path
+    run_name += f' {run_model_name} {data_args.task_name}, lr={training_args.learning_rate}'
     training_args.run_name = run_name
     training_args.output_dir = f"./glue_experiment/{training_args.output_dir}/{run_name}"
-    os.environ["WANDB_TAGS"] = f"GLUE {data_args.task_name} NEW"
+    os.environ["WANDB_TAGS"] = f"{run_model_name} GLUE {data_args.task_name}"
     if optimizer is not None:
         training_args.optimizer = optimizer.__class__.__name__
     else:
