@@ -422,6 +422,49 @@ def draw_rank_chart(history, r_0):
     plt.legend()
     plt.savefig('rank_chart.png')
 
+def draw_qkv_chart(ranks, r_0):
+    group_size = 3
+    num_groups = len(ranks) // group_size
+    colors = ['red', 'green', 'blue']
+    plt.figure(figsize=(12, 6))
+    plt.scatter(range(len(ranks)), [r_0] * len(ranks), 
+            color='gray', s=100, alpha=0.5, label=r"$r_0$")
+
+    # Добавляем стрелочки
+    for i, rank in enumerate(ranks):
+        if rank > r_0:
+            plt.annotate('', xy=(i, rank - 0.5), xytext=(i, r_0),
+                        arrowprops=dict(arrowstyle="->", color='green', lw=1.5))
+        elif rank < r_0:
+            plt.annotate('', xy=(i, rank + 0.5), xytext=(i, r_0),
+                        arrowprops=dict(arrowstyle="->", color='red', lw=1.5))
+
+    # Рисуем основные точки
+    for i in range(num_groups):
+        for j in range(group_size):
+            idx = i * group_size + j
+            plt.scatter(idx, ranks[idx], color=colors[j], s=100, 
+                    label=f'Group Pos {j+1}' if i == 0 else "")
+
+    # Добавляем пунктирные линии между группами
+    for i in range(1, num_groups):
+        plt.axvline(x=i * group_size - 0.5, color='black', linestyle='--', alpha=0.5)
+
+    # Подписи групп сверху
+    for i in range(num_groups):
+        group_center = (i * group_size) + (group_size - 1) / 2
+        plt.text(group_center, plt.ylim()[1] * 1.02, f'Group {i+1}', 
+                ha='center', va='bottom')
+
+    # Настройки осей
+    plt.xticks([])  # Убираем координаты на оси X
+    plt.ylabel('Rank Value')
+    plt.title('Rank Values with Group Separation')
+    plt.legend()
+
+    plt.tight_layout()
+    plt.savefig('test.png')
+
 
 class FatAdamW(optim.Optimizer):
     """
@@ -533,9 +576,9 @@ class FatAdamW(optim.Optimizer):
 
             if group["w_step"] % self.fat_step == 0:
                 w_vector = torch.tensor(w_vector)
-                # print(f"before proj {w_vector}")
+                print(f"before proj w_vector = {w_vector}")
                 w_vector = group["proj"](w_vector, self.temp) * self.num_adapters
-                # print(f"after proj {w_vector}")
+                print(f"after proj w_vector = {w_vector}")
 
                 j = 0
                 for i, p in enumerate(group["params"]):
@@ -546,27 +589,30 @@ class FatAdamW(optim.Optimizer):
                     j += 1
 
                 new_chosen_layers = []
-                new_lora_ranks = (w_vector * self.default_lora_rank).int()
+                new_lora_ranks_nonzero = []
+                new_lora_ranks_all = torch.ceil(w_vector * self.default_lora_rank).int()
+                print(f'new_lora_ranks_all = {new_lora_ranks_all}')
 
                 j = 0
                 for i, p in enumerate(group["params"]):
                     if p.grad is None or i not in self.chosen_layers:
                         continue
 
-                    if new_lora_ranks[j] > 0: 
+                    if new_lora_ranks_all[j] > 0:
+                        new_lora_ranks_nonzero.append(new_lora_ranks_all[j])
                         new_chosen_layers.append(i)
                         
                     j += 1
 
                 self.chosen_layers = new_chosen_layers
-                self.lora_ranks = new_lora_ranks
-
+                self.lora_ranks = torch.tensor(new_lora_ranks_nonzero)
+                print(f'self.lora_ranks = {self.lora_ranks}')
                 print("New chosen layers:", self.chosen_layers)
 
                 ### Graph ###
                 current_history = np.zeros(self.num_adapters)
                 for i, layer_idx in enumerate(self.chosen_layers):
-                    current_history[layer_idx] = new_lora_ranks[i]
+                    current_history[layer_idx] = self.lora_ranks[i]
 
                 self.graph_history.append(current_history)
         ####################################################################
@@ -636,20 +682,19 @@ class FatAdamW(optim.Optimizer):
         
         self.max_fat_steps -= 1
 
-        j = 0
-        for i, layer in enumerate(self.lora_layers):
-            if i not in self.chosen_layers:
-                continue
-
+        for j, layer_idx in enumerate(self.chosen_layers):
+            layer = self.lora_layers[layer_idx]
             # TODO check if type(layer._active_adapter) == 'str'
             # layer._active_adapter == ['default']
             adapter_name = layer._active_adapter[0]
 
             if self.max_fat_steps == 0:
+                print(f'layer._final_lora_rank_update... i={i},j={j}, self.lora_ranks={self.lora_ranks}')
                 layer._final_lora_rank_update(self.lora_ranks[j], adapter_name)
             else:
+                print(f'layer._update_lora_rank_QR... i={i},j={j}, self.lora_ranks={self.lora_ranks}')
                 layer._update_lora_rank_QR(self.lora_ranks[j], adapter_name)
-            
+
             lora_A = layer.lora_A[adapter_name].weight
             lora_B = layer.lora_B[adapter_name].weight
             
@@ -661,11 +706,10 @@ class FatAdamW(optim.Optimizer):
             self.state[lora_B]["exp_avg"] = torch.zeros_like(lora_B)
             self.state[lora_B]["exp_avg_sq"] = torch.zeros_like(lora_B) 
 
-            j += 1
-
         if self.max_fat_steps == 0:
             draw_rank_chart(self.graph_history, self.default_lora_rank)
-            print(self.graph_history)
+            draw_qkv_chart(self.graph_history[-1], self.default_lora_rank)
+            print(self.graph_history[-1])
 
         return loss
     

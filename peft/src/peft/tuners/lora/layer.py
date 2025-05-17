@@ -434,9 +434,16 @@ class LoraLayer(BaseTunerLayer):
     def _update_lora_rank_QR(self, new_rank, adapter_name):
         # lora_A: r x m, lora_B: n x r, W (base): n x m
         # A: m x r, B: r x n, W (base): n x m
+        print(f'_update_lora_rank_QR(old_rank={self.r[adapter_name]}, new_rank={new_rank})')
+        print(f'before: A.shape = {self.lora_A[adapter_name].weight.data.shape}')
+        print(f'before: B.shape = {self.lora_A[adapter_name].weight.data.shape}')
         lora_A = self.lora_A[adapter_name].weight.data.T
         lora_B = self.lora_B[adapter_name].weight.data.T
-        revert_flg = min(enumerate(lora_A.shape), key=lambda x: x[1])[0] == 0
+        revert_flg = max(
+            enumerate(lora_A.shape),
+            key=lambda x: int(x[1] == self.r[adapter_name])
+        )[0] == 0
+        print(f'revert_flg = {revert_flg}')
         if revert_flg:
             lora_A.data = lora_A.data.T
             lora_B.data = lora_B.data.T
@@ -444,15 +451,19 @@ class LoraLayer(BaseTunerLayer):
 
         current_rank = self.r[adapter_name]
         n, m = lora_B.shape[1], lora_A.shape[0]
+        print(f'n={n}, m={m}')
         
         torch.backends.cuda.preferred_linalg_library('magma')
+        
+        if current_rank == new_rank:
+            return
 
         if new_rank == 0:
             self._merge_delta_with_base(adapter_name)
 
-            lora_A.data = torch.zeros((0, m), requires_grad=False, device=device)
-            lora_B.data = torch.zeros((n, 0), requires_grad=False, device=device)
-            
+            lora_A.data = torch.zeros((m, 0), requires_grad=False, device=device)
+            lora_B.data = torch.zeros((0, n), requires_grad=False, device=device)
+
         elif new_rank > current_rank:
             Q, R = torch.linalg.qr(lora_A, mode="reduced")
             N = torch.randn((m, new_rank - current_rank), device=device)
@@ -492,6 +503,9 @@ class LoraLayer(BaseTunerLayer):
         self.lora_A[adapter_name].weight.data = lora_A.data.T
         self.lora_B[adapter_name].weight.data = lora_B.data.T
 
+        print(f'after: A.shape = {self.lora_A[adapter_name].weight.data.shape}')
+        print(f'after: B.shape = {self.lora_A[adapter_name].weight.data.shape}')
+
         self.r[adapter_name] = new_rank
 
         if new_rank == 0:
@@ -501,9 +515,13 @@ class LoraLayer(BaseTunerLayer):
 
 
     def _final_lora_rank_update(self, new_rank, adapter_name):
+        print(f'_final_lora_rank_update(old_rank={self.r[adapter_name]}, new_rank={new_rank})')
+        print(f'before: A.shape = {self.lora_A[adapter_name].weight.data.shape}')
+        print(f'before: B.shape = {self.lora_A[adapter_name].weight.data.shape}')
         self._merge_delta_with_base(adapter_name)
         device = self.lora_A[adapter_name].weight.device
         revert_flg = min(enumerate(self.lora_A[adapter_name].weight.data.shape), key=lambda x: x[1])[0] == 0
+        print(f'revert_flg = {revert_flg}')
         if revert_flg:
             n, m = self.lora_B[adapter_name].weight.data.shape[0], self.lora_A[adapter_name].weight.data.shape[1]
             self.lora_A[adapter_name].weight.data = torch.randn((new_rank, m), requires_grad=bool(new_rank > 0), device=device)
@@ -512,7 +530,10 @@ class LoraLayer(BaseTunerLayer):
             n, m = self.lora_B[adapter_name].weight.data.shape[1], self.lora_A[adapter_name].weight.data.shape[0]
             self.lora_A[adapter_name].weight.data = torch.randn((m, new_rank), requires_grad=bool(new_rank > 0), device=device)
             self.lora_B[adapter_name].weight.data = torch.zeros((new_rank, n), requires_grad=bool(new_rank > 0), device=device)
-        
+        print(f'n = {n}, m = {m}')
+        print(f'after: A.shape = {self.lora_A[adapter_name].weight.data.shape}')
+        print(f'after: B.shape = {self.lora_A[adapter_name].weight.data.shape}')
+
         self.lora_weight[adapter_name].data = torch.tensor(1., requires_grad=False, device=device)
         self.r[adapter_name] = new_rank
 
