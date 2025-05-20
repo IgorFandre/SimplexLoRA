@@ -55,13 +55,13 @@ def load_and_transform_jsonl(input_file):
     transformed_data = [{"chat": item["chat"]} for item in data]
     return transformed_data
 
-def set_seed(seed): # ставит сид
+def set_seed(seed):
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
 
-def set_device(device_no: int): # выбирает GPU-шку и выводит название
+def set_device(device_no: int): # choose GPU
     if torch.cuda.is_available():
         device = torch.device(f"cuda:{device_no}")
         print("There are %d GPU(s) available." % torch.cuda.device_count())
