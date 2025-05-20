@@ -5,6 +5,9 @@ from transformers import (
     HfArgumentParser,
     get_scheduler,
 )
+from transformers.trainer_utils import (
+    has_length
+)
 
 from utils_glue import glue_preprocess
 sys.path.append(os.getcwd())
@@ -72,7 +75,6 @@ def main():
         other_params = []
         
         for name, module in model.named_modules():
-            # TODO check base_layer name or smth else
             if isinstance(module, peft.tuners.lora.layer.LoraLayer):
                 lora_layers.append(module)
 
@@ -104,6 +106,29 @@ def main():
             lora_extention=training_args.lora_extention,
             default_lora_rank=training_args.lora_r,
         )
+        ######################################################
+
+        import math
+        len_dataloader = math.ceil(len(train_dataset) / training_args.per_device_train_batch_size)
+        num_update_steps_per_epoch = len_dataloader // training_args.gradient_accumulation_steps
+        num_update_steps_per_epoch = max(num_update_steps_per_epoch, 1)
+        if training_args.max_steps > 0:
+            max_steps = training_args.max_steps
+        else:
+            max_steps = math.ceil(training_args.num_train_epochs * num_update_steps_per_epoch)
+
+        ######################################################
+        calib_iters = training_args.max_fat_steps * training_args.fat_step
+        #scheduler1 = torch.optim.lr_scheduler.ConstantLR(optimizer, factor=0.1, total_iters=[calib_iters], verbose=True)
+        scheduler1 = torch.optim.lr_scheduler.LinearLR(optimizer, start_factor=0.01, total_iters=calib_iters, verbose=True)
+        scheduler2 = get_scheduler(
+                training_args.lr_scheduler_type,
+                optimizer=optimizer,
+                num_warmup_steps=training_args.warmup_steps,
+                num_training_steps=max_steps - calib_iters,
+                scheduler_specific_kwargs={'verbose': True}.update(training_args.lr_scheduler_kwargs),
+            )
+        #scheduler = torch.optim.lr_scheduler.SequentialLR(optimizer, schedulers=[scheduler1, scheduler2], milestones=[calib_iters])
 
     elif training_args.ft_strategy == "WeightLoRA":
         weight_params, other_params = [], []
