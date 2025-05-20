@@ -37,4 +37,3 @@ from .fourierft import FourierFTConfig, FourierFTModel
 from .xlora import XLoraConfig, XLoraModel
 from .hra import HRAConfig, HRAModel
 from .vblora import VBLoRAConfig, VBLoRAModel
-from .weight_lora import WeightLoraConfig, WeightLoraModel, WeightLoraLayer

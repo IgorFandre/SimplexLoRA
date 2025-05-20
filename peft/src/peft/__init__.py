@@ -91,8 +91,6 @@ from .tuners import (
     HRAConfig,
     HRAModel,
     VBLoRAConfig,
-    WeightLoraConfig,
-    WeightLoraModel
 )
 from .utils import (
     TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING,

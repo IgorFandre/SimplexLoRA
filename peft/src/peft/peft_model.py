@@ -62,8 +62,6 @@ from .tuners import (
     VeraModel,
     XLoraConfig,
     XLoraModel,
-    # ADD
-    WeightLoraModel,
 )
 from .tuners.tuners_utils import BaseTuner, BaseTunerLayer
 from .utils import (
@@ -104,8 +102,6 @@ PEFT_TYPE_TO_MODEL_MAPPING = {
     PeftType.XLORA: XLoraModel,
     PeftType.HRA: HRAModel,
     PeftType.VBLORA: VBLoRAModel,
-    # ADD
-    PeftType.WEIGHTLORA: WeightLoraModel,
 }
 
 
