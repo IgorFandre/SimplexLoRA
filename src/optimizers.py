@@ -356,7 +356,6 @@ def approx_0(x, k):
 def proj_0_old(x, mask):
     return x.mul(mask)
 
-
 def proj_0(x: torch.Tensor, K: int):
     _, idx = torch.topk(x, k=x.shape[0] - K, largest=False)
     x[idx] = 0.0
@@ -396,76 +395,6 @@ def proj_simplex_euclidean(x: torch.Tensor, temp=None, tau=0.0001, max_iter=1000
     ans = torch.maximum(x - midpoint, null)
     return ans / torch.sum(ans)
 
-def draw_rank_chart(history, r_0):
-    plt.style.use("ggplot")
-    plt.figure(figsize=(16, 9))
-
-    max_rank = 0
-    for ranks in history:
-        max_rank = max(max_rank, max(ranks))
-
-    for i, ranks in enumerate(history):
-        nonzero_ranks = list(filter(lambda rank: rank != 0, ranks))
-
-        plt.hist(
-            nonzero_ranks,
-            bins=np.linspace(0, max_rank + 1, 15),
-            edgecolor="black",
-            alpha=0.4,
-            label=f"{i + 1} iteration: {len(nonzero_ranks)} active LoRA"
-        )
-
-    plt.title(r"Nonzero rank distribution ($r_0 = {}$)".format(r_0))
-    plt.xlabel('rank')
-    plt.ylabel('count')
-
-    plt.legend()
-    plt.savefig('rank_chart.png')
-
-def draw_qkv_chart(ranks, r_0):
-    group_size = 3
-    num_groups = len(ranks) // group_size
-    colors = ['red', 'green', 'blue']
-    plt.figure(figsize=(12, 6))
-    plt.scatter(range(len(ranks)), [r_0] * len(ranks), 
-            color='gray', s=100, alpha=0.5, label=r"$r_0$")
-
-    # Добавляем стрелочки
-    for i, rank in enumerate(ranks):
-        if rank > r_0:
-            plt.annotate('', xy=(i, rank - 0.5), xytext=(i, r_0),
-                        arrowprops=dict(arrowstyle="->", color='green', lw=1.5))
-        elif rank < r_0:
-            plt.annotate('', xy=(i, rank + 0.5), xytext=(i, r_0),
-                        arrowprops=dict(arrowstyle="->", color='red', lw=1.5))
-
-    # Рисуем основные точки
-    for i in range(num_groups):
-        for j in range(group_size):
-            idx = i * group_size + j
-            plt.scatter(idx, ranks[idx], color=colors[j], s=100, 
-                    label=f'Group Pos {j+1}' if i == 0 else "")
-
-    # Добавляем пунктирные линии между группами
-    for i in range(1, num_groups):
-        plt.axvline(x=i * group_size - 0.5, color='black', linestyle='--', alpha=0.5)
-
-    # Подписи групп сверху
-    for i in range(num_groups):
-        group_center = (i * group_size) + (group_size - 1) / 2
-        plt.text(group_center, plt.ylim()[1] * 1.02, f'Group {i+1}', 
-                ha='center', va='bottom')
-
-    # Настройки осей
-    plt.xticks([])  # Убираем координаты на оси X
-    plt.ylabel('Rank Value')
-    plt.title('Rank Values with Group Separation')
-    plt.legend()
-
-    plt.tight_layout()
-    plt.savefig('test.png')
-
-
 class FatAdamW(optim.Optimizer):
     """
     Implements Adam algorithm with weight decay for Weight Lora adapter
@@ -501,7 +430,7 @@ class FatAdamW(optim.Optimizer):
         lora_extention: str = "smart",
         fat_step: int = 10,
         max_fat_steps: int = 3,
-        default_lora_rank: int = 16 # NEW
+        default_lora_rank: int = 16
     ):
         if not no_deprecation_warning:
             warnings.warn(
@@ -538,8 +467,6 @@ class FatAdamW(optim.Optimizer):
 
         self.fat_step = fat_step
         self.max_fat_steps = max_fat_steps
-
-        self.graph_history = []
 
     @torch.no_grad()
     def step(self, closure: Callable = None):
@@ -609,12 +536,6 @@ class FatAdamW(optim.Optimizer):
                 print(f'self.lora_ranks = {self.lora_ranks}')
                 print("New chosen layers:", self.chosen_layers)
 
-                ### Graph ###
-                current_history = np.zeros(self.num_adapters)
-                for i, layer_idx in enumerate(self.chosen_layers):
-                    current_history[layer_idx] = self.lora_ranks[i]
-
-                self.graph_history.append(current_history)
         ####################################################################
         
         lora_rank_update = False
@@ -628,10 +549,6 @@ class FatAdamW(optim.Optimizer):
                 if p.grad is None:
                     continue
 
-                # TODO check if not active lora
-                # if (i // 2) not in self.chosen_layers and group["name"] == "loraAB_params": # WARNING !!! Why divide i by 2 ???
-                #     continue
-                    
                 grad = p.grad
                 if grad.is_sparse:
                     raise RuntimeError("Adam does not support sparse gradients, please consider SparseAdam instead")
@@ -684,8 +601,6 @@ class FatAdamW(optim.Optimizer):
 
         for j, layer_idx in enumerate(self.chosen_layers):
             layer = self.lora_layers[layer_idx]
-            # TODO check if type(layer._active_adapter) == 'str'
-            # layer._active_adapter == ['default']
             adapter_name = layer._active_adapter[0]
 
             if self.max_fat_steps == 0:
@@ -706,13 +621,8 @@ class FatAdamW(optim.Optimizer):
             self.state[lora_B]["exp_avg"] = torch.zeros_like(lora_B)
             self.state[lora_B]["exp_avg_sq"] = torch.zeros_like(lora_B) 
 
-        if self.max_fat_steps == 0:
-            draw_rank_chart(self.graph_history, self.default_lora_rank)
-            draw_qkv_chart(self.graph_history[-1], self.default_lora_rank)
-            print(self.graph_history[-1])
-
         return loss
-    
+
 class WeightAdamW(optim.Optimizer):
     """
     Implements Adam algorithm with weight decay for Weight Lora adapter
