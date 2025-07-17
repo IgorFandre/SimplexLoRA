@@ -488,23 +488,27 @@ class FatAdamW(optim.Optimizer):
             # weight_params group
             group = list(filter(lambda group: group["name"] == "weight_params", self.param_groups))[0]
 
-            w_vector = []
+            w_vector_old = []
 
             if "w_step" not in group.keys(): 
                 group["w_step"] = 0
             group["w_step"] += 1
-
+            
             for i, p in enumerate(group["params"]):
                 if p.grad is None or i not in self.chosen_layers:
                     continue
 
                 p.add_(p.grad, alpha=-group['lr'])
-                w_vector.append(p.data.item())
+                                
+                if group["weight_decay"] > 0.0:
+                    p.add_(p - (1 / len(self.chosen_layers)), alpha=(-group["lr"] * group["weight_decay"]))
+
+                w_vector_old.append(p.data.item())
 
             if group["w_step"] % self.fat_step == 0:
-                w_vector = torch.tensor(w_vector)
-                print(f"before proj w_vector = {w_vector}")
-                w_vector = group["proj"](w_vector, self.temp) * self.num_adapters
+                w_vector_old = torch.tensor(w_vector_old)
+                print(f"before proj w_vector = {w_vector_old}")
+                w_vector = group["proj"](w_vector_old, self.temp) * self.num_adapters
                 print(f"after proj w_vector = {w_vector}")
 
                 j = 0
@@ -516,6 +520,8 @@ class FatAdamW(optim.Optimizer):
                     j += 1
 
                 new_chosen_layers = []
+                prev_lora_weights_nonzero = []
+                new_lora_weights_nonzero = []
                 new_lora_ranks_nonzero = []
                 new_lora_ranks_all = torch.ceil(w_vector * self.default_lora_rank).int()
                 print(f'new_lora_ranks_all = {new_lora_ranks_all}')
@@ -526,6 +532,8 @@ class FatAdamW(optim.Optimizer):
                         continue
 
                     if new_lora_ranks_all[j] > 0:
+                        prev_lora_weights_nonzero.append(w_vector_old[j])
+                        new_lora_weights_nonzero.append(w_vector[j])
                         new_lora_ranks_nonzero.append(new_lora_ranks_all[j])
                         new_chosen_layers.append(i)
                         
@@ -610,6 +618,9 @@ class FatAdamW(optim.Optimizer):
                 print(f'layer._update_lora_rank_QR... i={i},j={j}, self.lora_ranks={self.lora_ranks}')
                 layer._update_lora_rank_QR(self.lora_ranks[j], adapter_name)
 
+            if self.lora_ranks[j] > 0 and new_lora_weights_nonzero[j] > 0:
+                print(f'coeff = {prev_lora_weights_nonzero[j] / new_lora_weights_nonzero[j]})')
+                layer.lora_A[adapter_name].weight.data *= prev_lora_weights_nonzero[j] / new_lora_weights_nonzero[j]
             lora_A = layer.lora_A[adapter_name].weight
             lora_B = layer.lora_B[adapter_name].weight
             

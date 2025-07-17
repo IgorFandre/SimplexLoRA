@@ -128,7 +128,7 @@ def main():
                 num_training_steps=max_steps - calib_iters,
                 scheduler_specific_kwargs={'verbose': True}.update(training_args.lr_scheduler_kwargs),
             )
-        #scheduler = torch.optim.lr_scheduler.SequentialLR(optimizer, schedulers=[scheduler1, scheduler2], milestones=[calib_iters])
+        scheduler = torch.optim.lr_scheduler.SequentialLR(optimizer, schedulers=[scheduler1, scheduler2], milestones=[calib_iters])
 
     elif training_args.ft_strategy == "WeightLoRA":
         weight_params, other_params = [], []
