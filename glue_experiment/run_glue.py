@@ -120,7 +120,7 @@ def main():
         ######################################################
         calib_iters = training_args.max_fat_steps * training_args.fat_step
         #scheduler1 = torch.optim.lr_scheduler.ConstantLR(optimizer, factor=0.1, total_iters=[calib_iters], verbose=True)
-        scheduler1 = torch.optim.lr_scheduler.LinearLR(optimizer, start_factor=0.01, total_iters=calib_iters, verbose=True)
+        scheduler1 = torch.optim.lr_scheduler.LinearLR(optimizer, start_factor=0.001, total_iters=calib_iters, verbose=True)
         scheduler2 = get_scheduler(
                 training_args.lr_scheduler_type,
                 optimizer=optimizer,
@@ -162,7 +162,7 @@ def main():
     training_args.peft_proportion = training_args.peft_params / training_args.all_params * 100 
     os.environ["WANDB_PROJECT"] = "SIMPLEX_LORA"
     if training_args.ft_strategy in ["FatLoRA", ]:
-        run_name = f"[{training_args.ft_strategy} fs={training_args.fat_step}, mfs={training_args.max_fat_steps}, r={training_args.lora_r}]"
+        run_name = f"[{training_args.ft_strategy} fs={training_args.fat_step}, mfs={training_args.max_fat_steps}, r={training_args.lora_r}, wd={training_args.weight_decay}]"
     else:
         run_name = f"[{training_args.ft_strategy} r={training_args.lora_r}]"
     if model_args.model_name_or_path == "meta-llama/Meta-Llama-3.1-8B":
