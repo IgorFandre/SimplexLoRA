@@ -500,7 +500,7 @@ class FatAdamW(optim.Optimizer):
 
                 p.add_(p.grad, alpha=-group['lr'])
                                 
-                if group["weight_decay"] > 0.0:
+                if group["wd"] > 0.0:
                     p.add_(p - 1, alpha=(-group["lr"] * group["weight_decay"]))
 
                 w_vector_old.append(p.data.item())

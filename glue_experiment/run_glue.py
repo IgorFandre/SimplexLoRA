@@ -92,6 +92,7 @@ def main():
                     "params": weight_params,
                     "proj": optimizers.proj_simplex_euclidean,
                     "lr": training_args.learning_rate_w,
+                    "wd": training_args.weight_decay_w,
                     "name": "weight_params",
                 },
             ],
