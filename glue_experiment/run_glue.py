@@ -121,16 +121,24 @@ def main():
         ######################################################
         calib_iters = training_args.max_fat_steps * training_args.fat_step
         #scheduler1 = torch.optim.lr_scheduler.ConstantLR(optimizer, factor=0.1, total_iters=[calib_iters], verbose=True)
-        scheduler1 = torch.optim.lr_scheduler.LinearLR(optimizer, start_factor=0.001, total_iters=calib_iters, verbose=True)
-        scheduler2 = get_scheduler(
-                training_args.lr_scheduler_type,
-                optimizer=optimizer,
-                num_warmup_steps=training_args.warmup_steps,
-                num_training_steps=max_steps - calib_iters,
-                scheduler_specific_kwargs={'verbose': True}.update(training_args.lr_scheduler_kwargs),
-            )
-        scheduler = torch.optim.lr_scheduler.SequentialLR(optimizer, schedulers=[scheduler1, scheduler2], milestones=[calib_iters])
-
+        if calib_iters > 0:
+            scheduler1 = torch.optim.lr_scheduler.LinearLR(optimizer, start_factor=0.001, total_iters=calib_iters, verbose=True)
+            scheduler2 = get_scheduler(
+                    training_args.lr_scheduler_type,
+                    optimizer=optimizer,
+                    num_warmup_steps=training_args.warmup_steps,
+                    num_training_steps=max_steps - calib_iters,
+                    scheduler_specific_kwargs={'verbose': True}.update(training_args.lr_scheduler_kwargs),
+                )
+            scheduler = torch.optim.lr_scheduler.SequentialLR(optimizer, schedulers=[scheduler1, scheduler2], milestones=[calib_iters])
+        else:
+            scheduler = get_scheduler(
+                    training_args.lr_scheduler_type,
+                    optimizer=optimizer,
+                    num_warmup_steps=training_args.warmup_steps,
+                    num_training_steps=max_steps - calib_iters,
+                    scheduler_specific_kwargs={'verbose': True}.update(training_args.lr_scheduler_kwargs),
+                )
     elif training_args.ft_strategy == "WeightLoRA":
         weight_params, other_params = [], []
         for name, param in model.named_parameters():

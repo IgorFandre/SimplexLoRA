@@ -310,6 +310,10 @@ class TrainingArguments(Seq2SeqTrainingArguments):
         default=0.01,
         metadata={"help": "Weight decay"}
     )
+    weight_decay_w: Optional[float] = field(
+        default=0.0,
+        metadata={"help": "Weight decay for LoRA"}
+    )
     eval_strategy: Optional[str] = field(
         default="steps",
         metadata={"help": "How to make eval"}
